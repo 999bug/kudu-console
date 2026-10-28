@@ -1,0 +1,20 @@
+target/
+logs/
+.idea/
+*.iml
+.DS_Store
+
+# 前端依赖与构建产物（由 build 脚本生成）
+web/node_modules/
+web/dist/
+src/main/resources/static/
+
+# 界面里维护的平台清单（含环境地址，不入库）
+config/clusters.json
+config/connection.json
+
+# 本地验证脚本与截图
+.shots/
+
+# Agent 工作目录（会话记忆，不入库）
+.workbuddy/

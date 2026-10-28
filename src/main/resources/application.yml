@@ -1,0 +1,48 @@
+server:
+  port: 8088
+  address: 0.0.0.0
+  compression:
+    enabled: true
+  error:
+    include-message: always
+
+spring:
+  application:
+    name: kudu-console
+  mvc:
+    problemdetails:
+      enabled: false
+
+kudu-console:
+  # 测试集群 master RPC 地址，逗号分隔
+  masters: 192.168.46.23:7051,192.168.46.23:7151,192.168.46.23:7251
+  operation-timeout-ms: 30000
+  admin-timeout-ms: 60000
+  connect-timeout-ms: 10000
+  web-ui:
+    enabled: true
+    # master Web UI 端口 = RPC 端口 + offset（Kudu 默认约定）
+    port-offset: 1000
+    scheme: http
+    base-urls: []
+    connect-timeout-ms: 2000
+    read-timeout-ms: 5000
+  query:
+    default-limit: 100
+    max-limit: 500
+    max-offset: 10000
+    max-scan-rows: 50000
+    batch-bytes: 1048576
+  write:
+    batch-size: 1000
+  truncate:
+    batch-size: 1000
+    max-rows: 2000000
+
+logging:
+  level:
+    root: INFO
+    com.kuducrud: INFO
+    org.apache.kudu: WARN
+  file:
+    name: logs/kudu-console.log
