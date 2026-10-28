@@ -2,9 +2,10 @@
 import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { api } from '../api'
-import { toastError } from '../store'
+import { toast, toastError } from '../store'
 import { formatBytes, formatCount } from '../format'
 import CreateTableDialog from '../components/CreateTableDialog.vue'
+import ConfirmDialog from '../components/ConfirmDialog.vue'
 
 const router = useRouter()
 const loading = ref(false)
@@ -13,6 +14,11 @@ const data = ref(null)
 const keyword = ref('')
 const activeDb = ref('')
 const showCreate = ref(false)
+
+const deleteTable = ref(null)
+const deleteDb = ref(null)
+const droppingTable = ref(false)
+const droppingDb = ref(false)
 
 const groups = computed(() => {
   const list = data.value?.dbs || []
@@ -27,6 +33,18 @@ const groups = computed(() => {
 })
 
 const visibleCount = computed(() => groups.value.reduce((sum, group) => sum + group.tables.length, 0))
+
+const dbDropMessage = computed(() => {
+  if (!deleteDb.value) return ''
+  const group = deleteDb.value
+  const names = group.tables.map((t) => t.name)
+  const preview = names.slice(0, 6).join('、')
+  const more = names.length > 6 ? ` 等 ${names.length} 张表` : ''
+  const impala = group.tables.some((t) => t.impalaManaged)
+  return `将永久删除库「${group.db}」下的 ${names.length} 张表：${preview}${more}。`
+    + (impala ? ' 其中包含 Impala 托管的表，删除后 Impala 元数据会失效，需要执行 INVALIDATE METADATA。' : '')
+    + ' 该操作不可恢复。'
+})
 
 async function load() {
   loading.value = true
@@ -49,6 +67,38 @@ function onCreated(name) {
   showCreate.value = false
   load()
   if (name) openTable(name)
+}
+
+async function confirmDropTable() {
+  const target = deleteTable.value
+  if (!target) return
+  droppingTable.value = true
+  try {
+    await api.dropTable(target.name, target.name)
+    toast('已删除表：' + target.name)
+    deleteTable.value = null
+    await load()
+  } catch (e) {
+    toastError(e)
+  } finally {
+    droppingTable.value = false
+  }
+}
+
+async function confirmDropDb() {
+  const target = deleteDb.value
+  if (!target) return
+  droppingDb.value = true
+  try {
+    const job = await api.dropDb(target.db, target.db)
+    toast(`已提交删除任务：${target.db}（${job.totalEstimate ?? target.tables.length} 张表）`)
+    deleteDb.value = null
+    router.push('/jobs')
+  } catch (e) {
+    toastError(e)
+  } finally {
+    droppingDb.value = false
+  }
 }
 
 onMounted(load)
@@ -104,6 +154,7 @@ onMounted(load)
                 <span class="caret">▾</span>
                 <span>{{ group.db }}</span>
                 <span class="db-count">{{ group.tables.length }} 张表</span>
+                <button class="btn ghost sm db-drop" @click="deleteDb = group">删除库</button>
               </div>
               <div class="grid-wrap">
                 <table class="grid">
@@ -128,7 +179,10 @@ onMounted(load)
                       <td>
                         <span v-if="table.impalaManaged" class="tag impala">impala 托管</span>
                       </td>
-                      <td class="nowrap"><span class="btn ghost sm">打开</span></td>
+                      <td class="nowrap">
+                        <span class="btn ghost sm">打开</span>
+                        <button class="btn ghost sm" style="color: var(--danger)" @click.stop="deleteTable = table">删除</button>
+                      </td>
                     </tr>
                   </tbody>
                 </table>
@@ -139,9 +193,32 @@ onMounted(load)
       </div>
       <div class="hint" style="margin-top: 8px">
         表名为 Kudu 中的完整名；<span class="mono">impala::</span> 前缀表示该表由 Impala 创建管理。
+        「删除库」会删掉该前缀下的全部表（Kudu 没有真正的库），走异步任务，可在任务中心看进度。
       </div>
     </div>
 
     <CreateTableDialog v-if="showCreate" @close="showCreate = false" @created="onCreated" />
+
+    <ConfirmDialog
+      v-if="deleteTable"
+      title="删除表"
+      :message="`将永久删除表 ${deleteTable.name} 及其全部数据，此操作不可恢复。`"
+      :expect="deleteTable.name"
+      confirm-text="删除表"
+      :busy="droppingTable"
+      @confirm="confirmDropTable"
+      @close="deleteTable = null"
+    />
+
+    <ConfirmDialog
+      v-if="deleteDb"
+      title="删除库"
+      :message="dbDropMessage"
+      :expect="deleteDb.db"
+      confirm-text="删除整个库"
+      :busy="droppingDb"
+      @confirm="confirmDropDb"
+      @close="deleteDb = null"
+    />
   </div>
 </template>

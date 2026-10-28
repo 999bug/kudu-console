@@ -62,7 +62,7 @@ onUnmounted(() => {
   <div class="card">
     <div class="card-head">
       <div class="card-title">任务中心</div>
-      <div class="card-sub">当前只有清空表数据（TRUNCATE）会生成任务，最多保留 50 条</div>
+      <div class="card-sub">清空表按行计数，删库按表计数；最多保留 50 条</div>
       <div class="card-actions">
         <button class="btn sm" @click="load" :disabled="loading">
           <span v-if="loading" class="spinner"></span>刷新
@@ -81,7 +81,7 @@ onUnmounted(() => {
               <th>状态</th>
               <th>类型</th>
               <th>平台</th>
-              <th>表</th>
+              <th>对象</th>
               <th class="num">已处理</th>
               <th class="num">已删除</th>
               <th class="num">失败</th>

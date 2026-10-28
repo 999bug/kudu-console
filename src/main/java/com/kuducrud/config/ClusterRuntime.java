@@ -1,6 +1,7 @@
 package com.kuducrud.config;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.kuducrud.job.DropDbService;
 import com.kuducrud.job.JobRegistry;
 import com.kuducrud.job.TruncateService;
 import com.kuducrud.kudu.KuduConnectionManager;
@@ -29,6 +30,7 @@ public class ClusterRuntime {
     private final DdlService ddl;
     private final ClusterStatusService status;
     private final TruncateService truncate;
+    private final DropDbService dropDb;
 
     public ClusterRuntime(ClusterConfig config, KuduProperties props, ObjectMapper mapper, JobRegistry jobs) {
         this.config = config;
@@ -43,6 +45,7 @@ public class ClusterRuntime {
         this.ddl = new DdlService(connection);
         this.status = new ClusterStatusService(connection, webUi, config);
         this.truncate = new TruncateService(connection, jobs, props, config.id());
+        this.dropDb = new DropDbService(connection, jobs, config.id());
     }
 
     public ClusterConfig config() {
@@ -83,6 +86,10 @@ public class ClusterRuntime {
 
     public TruncateService truncate() {
         return truncate;
+    }
+
+    public DropDbService dropDb() {
+        return dropDb;
     }
 
     public ClusterStatus statusSnapshot() {

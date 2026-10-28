@@ -1,5 +1,6 @@
 package com.kuducrud.job;
 
+import com.kuducrud.kudu.TableNameUtil;
 import com.kuducrud.model.JobView;
 import com.kuducrud.web.ApiException;
 import jakarta.annotation.PreDestroy;
@@ -29,7 +30,8 @@ public class JobRegistry {
     private static final int MAX_JOBS = 50;
 
     private final Map<String, JobHandle> jobs = new ConcurrentHashMap<>();
-    private final Set<String> runningTables = ConcurrentHashMap.newKeySet();
+    private final Set<String> runningKeys = ConcurrentHashMap.newKeySet();
+    private final Map<String, String> jobLocks = new ConcurrentHashMap<>();
     private final ExecutorService executor;
 
     public JobRegistry() {
@@ -41,15 +43,25 @@ public class JobRegistry {
         });
     }
 
-    public JobHandle create(String type, String clusterId, String table) {
-        if (!runningTables.add(clusterId + "|" + table)) {
-            throw ApiException.conflict("JOB_CONFLICT", "表 " + table + " 已有正在运行的破坏性任务");
+    /**
+     * 登记任务并占用资源锁。{@code resourceKey} 相同即互斥：
+     * 单表任务用 {@code clusterId|t:<table>}，删库任务用 {@code clusterId|d:<db>}。
+     */
+    public JobHandle create(String type, String clusterId, String target, String resourceKey, String lockLabel) {
+        if (!runningKeys.add(resourceKey)) {
+            throw ApiException.conflict("JOB_CONFLICT", lockLabel + " 已有正在运行的破坏性任务");
         }
         String id = UUID.randomUUID().toString().replace("-", "").substring(0, 16);
-        JobHandle handle = new JobHandle(id, type, clusterId, table);
+        JobHandle handle = new JobHandle(id, type, clusterId, target);
+        jobLocks.put(id, resourceKey);
         jobs.put(id, handle);
         trim();
         return handle;
+    }
+
+    /** 单表任务：锁 {@code t:<table>}。 */
+    public JobHandle create(String type, String clusterId, String table) {
+        return create(type, clusterId, table, tableKey(clusterId, table), "表 " + table);
     }
 
     public void submit(JobHandle handle, Runnable task) {
@@ -62,13 +74,33 @@ public class JobRegistry {
                     handle.markFinished("FAILED", e.getMessage() == null ? e.toString() : e.getMessage());
                 }
             } finally {
-                runningTables.remove(handle.clusterId() + "|" + handle.table());
+                release(handle);
             }
         });
     }
 
     public void release(JobHandle handle) {
-        runningTables.remove(handle.clusterId() + "|" + handle.table());
+        String key = jobLocks.remove(handle.id());
+        if (key != null) {
+            runningKeys.remove(key);
+        }
+    }
+
+    /** 该库下是否有正在运行的单表任务（删库前检查，避免互相踩）。 */
+    public boolean anyRunningInDb(String clusterId, String db) {
+        String prefix = clusterId + "|t:";
+        return runningKeys.stream()
+                .filter(key -> key.startsWith(prefix))
+                .map(key -> key.substring(prefix.length()))
+                .anyMatch(table -> db.equalsIgnoreCase(TableNameUtil.dbOf(table)));
+    }
+
+    public static String tableKey(String clusterId, String table) {
+        return clusterId + "|t:" + table;
+    }
+
+    public static String dbKey(String clusterId, String db) {
+        return clusterId + "|d:" + db;
     }
 
     public JobHandle get(String id) {

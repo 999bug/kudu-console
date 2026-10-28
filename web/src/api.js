@@ -92,6 +92,8 @@ export const api = {
 
   truncate: (table, confirm) =>
     request('POST', '/api/jobs/truncate', { params: { table }, body: { confirm, acknowledge: true } }),
+  dropDb: (db, confirm) =>
+    request('POST', '/api/jobs/drop-db', { params: { db }, body: { confirm, acknowledge: true } }),
   jobs: () => request('GET', '/api/jobs'),
   job: (id) => request('GET', '/api/jobs/' + id),
   cancelJob: (id) => request('POST', `/api/jobs/${id}/cancel`)

@@ -370,6 +370,8 @@ table.grid td.wrap { white-space: normal; min-width: 180px; }
 }
 .db-head:hover { background: var(--surface-3); }
 .db-count { color: var(--text-3); font-family: var(--sans); }
+.db-head .db-drop { margin-left: auto; opacity: .75; }
+.db-head .db-drop:hover { opacity: 1; color: var(--danger); }
 .caret { width: 10px; display: inline-block; color: var(--text-3); }
 
 .split { display: grid; grid-template-columns: 190px minmax(0, 1fr); gap: 14px; align-items: start; }

@@ -38,6 +38,18 @@ public class JobController {
                 request == null ? null : request.acknowledge());
     }
 
+    public record DropDbRequest(String confirm, Boolean acknowledge) {
+    }
+
+    /** 删除库：把该前缀下所有表逐个删掉（异步任务）。 */
+    @PostMapping("/drop-db")
+    public JobView dropDb(@RequestParam("db") String db,
+                          @RequestBody(required = false) DropDbRequest request) {
+        return registry.current().dropDb().submit(db,
+                request == null ? null : request.confirm(),
+                request == null ? null : request.acknowledge());
+    }
+
     @GetMapping
     public List<JobView> list() {
         return jobs.list();
