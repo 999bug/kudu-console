@@ -1,0 +1,11 @@
+# 构建上下文瘦身：这些目录要么由镜像内构建生成，要么属于本地环境
+.git
+.idea
+.workbuddy
+target
+logs
+config/*.json
+src/main/resources/static
+web/node_modules
+web/dist
+*.jar
