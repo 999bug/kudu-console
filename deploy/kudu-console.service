@@ -1,0 +1,22 @@
+[Unit]
+Description=Kudu Console
+Documentation=https://github.com/999bug/kudu-crud
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=kudu
+Group=kudu
+WorkingDirectory=/opt/kudu-console
+Environment=JAVA_OPTS=-Xms256m -Xmx1g
+Environment=TZ=Asia/Shanghai
+ExecStart=/usr/bin/java $JAVA_OPTS -jar /opt/kudu-console/kudu-console.jar
+Restart=on-failure
+RestartSec=5
+# 只允许写自己的工作目录
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

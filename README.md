@@ -1,5 +1,7 @@
 # Kudu 控制台
 
+[![CI](https://github.com/999bug/kudu-crud/actions/workflows/ci.yml/badge.svg)](https://github.com/999bug/kudu-crud/actions/workflows/ci.yml)
+
 测试环境用的 Apache Kudu 管理台：一个 Java 进程同时提供 REST 接口与 Vue 前端页面，前后端在同一个工程目录内，一条命令启动。
 
 支持**多个 Kudu 平台**：在界面里添加任意多套 master 地址，侧栏一键切换；每个平台独立建连、独立缓存，某个平台连不上不会影响其它平台。启动时只从 `application.yml` 初始化第一个平台，之后以 `config/clusters.json` 为准。
@@ -162,6 +164,7 @@ kudu-console/
 
 ## 实现要点与限制
 
+- **多平台隔离**：每个平台一个 `ClusterRuntime`（独立 KuduClient、表缓存、Web UI 统计缓存），配置存 `config/clusters.json`；某个平台连不上只影响它自己。平台按需懒建连，不会在启动时把所有集群都连一遍。
 - **分页是「扫描 + 跳过 offset」**：Kudu 没有 OFFSET，且 hash 分区下扫描不保证主键全局有序，因此不做主键游标翻页。`limit ≤ 500`、`offset ≤ 10000`、单次扫描 ≤ 50000 行，超限直接拒绝，避免拖垮 tserver。行数只给估算值，不跑 `COUNT(*)`。
 - **只支持 AND**：Kudu 谓词无 OR。`NE` 与 `PREFIX` 的后缀校验在客户端完成（响应里 `clientFiltered=true`）；`NE` 按 SQL 语义排除 NULL。
 - **写入无事务**：`MANUAL_FLUSH` 分批提交，失败行逐条返回，已提交的行不会回滚。
@@ -181,5 +184,29 @@ mvn test          # 15 个单元测试：类型转换、表名解析、DDL 校�
 
 ```bash
 python tools/api-smoke.py
+KUDU_CLUSTER=c17eeff58 python tools/api-smoke.py     # 指定平台
 KUDU_CONSOLE_URL=http://localhost:9090 python tools/api-smoke.py
 ```
+
+## 发布与部署
+
+这个项目不是静态站点，**GitHub Pages 部署不了**（跑不了 JVM，也连不到内网 Kudu）。GitHub 负责源码托管 + 自动出包，进程必须跑在能访问 Kudu master 的机器上。
+
+```bash
+git tag v1.0.1 && git push origin v1.0.1    # 触发 Actions，产出 jar + sha256 到 Release
+```
+
+服务器上在线升级（版本比对 → 校验 → 原子替换 → 起不来自动回滚）：
+
+```bash
+cd /opt/kudu-console && ./deploy/upgrade.sh
+```
+
+Docker 一键起服务：
+
+```bash
+cp .env.example .env && vi .env
+docker compose up -d --build
+```
+
+完整的三种上线方式、公网暴露与鉴权（Cloudflare Tunnel / Caddy）、回滚与巡检配置见 **[DEPLOY.md](DEPLOY.md)**。

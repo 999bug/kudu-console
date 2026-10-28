@@ -1,0 +1,43 @@
+# 内网机器上一条命令起服务：docker compose up -d --build
+#
+# jar 挂载到容器里，升级时只需替换宿主机的 kudu-console.jar 再 restart，
+# 不用重新构建镜像（deploy/upgrade.sh 就是干这个的）。
+services:
+  kudu-console:
+    build: .
+    image: kudu-console:local
+    container_name: kudu-console
+    restart: unless-stopped
+    ports:
+      - "${HOST_PORT:-8088}:8088"
+    environment:
+      # 集群地址优先级：命令行参数 > 环境变量 > application.yml
+      KUDUCONSOLE_MASTERS: "${KUDU_MASTERS:-192.168.46.23:7051,192.168.46.23:7151,192.168.46.23:7251}"
+      JAVA_OPTS: "${JAVA_OPTS:--Xms256m -Xmx1g}"
+      TZ: Asia/Shanghai
+    volumes:
+      # 首次启动前若 jar 不存在，容器用镜像内置版本；放入新 jar 后 restart 即生效
+      - ./kudu-console.jar:/app/app.jar:ro
+      - ./data/config:/app/config
+      - ./data/logs:/app/logs
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8088/api/cluster/status || exit 1"]
+      interval: 30s
+      timeout: 5s
+      start_period: 40s
+      retries: 3
+
+  # 可选：把服务暴露到公网（无需公网 IP、无需开端口）。
+  # 用法：在 Cloudflare Zero Trust 建一个 Tunnel，把 token 填进 .env 的 TUNNEL_TOKEN，
+  # 并把 Public Hostname 指向 http://kudu-console:8088。
+  # 强烈建议同时配置 Access 策略，否则等于把无鉴权的管理台挂到公网。
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: kudu-console-tunnel
+    restart: unless-stopped
+    command: tunnel --no-autoupdate run
+    environment:
+      TUNNEL_TOKEN: ${TUNNEL_TOKEN:-}
+    depends_on:
+      - kudu-console
+    profiles: ["tunnel"]

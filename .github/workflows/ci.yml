@@ -1,0 +1,62 @@
+# 持续集成：每次 push / PR 都验证「前端能构建 + 后端能测试」
+#
+# 前端产物直接写进 src/main/resources/static/，所以顺序必须是 npm build → mvn package，
+# 否则打出来的 jar 里没有页面（该目录不入库，由构建生成）。
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Setup JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: maven
+
+      - name: Build frontend
+        working-directory: web
+        run: |
+          npm ci
+          npm run build
+
+      # 前端没产出 index.html 时，jar 里就是空页面，提前拦住
+      - name: Verify frontend output
+        run: test -f src/main/resources/static/index.html
+
+      - name: Test backend
+        run: mvn -B test
+
+      - name: Package
+        run: mvn -B -DskipTests package
+
+      - name: Upload jar
+        uses: actions/upload-artifact@v4
+        with:
+          name: kudu-console-jar
+          path: target/kudu-console.jar
+          retention-days: 7
