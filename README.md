@@ -62,7 +62,9 @@ IMAGE=ghcr.io/999bug/kudu-console:v1.0.1
 docker compose -f docker-compose.prod.yml up -d
 ```
 
-首次要拉完整镜像（约 144MB，含 JRE 与全部依赖），耗时取决于到 ghcr.io 的网络。慢的话挂着让它跑就行——`docker pull` 按层下载，中断后重试会复用已完成的层，不会从头再来。
+首次要拉完整镜像（约 137MB，含 JRE 与全部依赖），耗时取决于到 ghcr.io 的网络。慢的话挂着让它跑就行——`docker pull` 按层下载，中断后重试会复用已完成的层。
+
+实在等不了就走**离线包**：先导入再启动，之后照样走增量更新，见第七节。
 
 **4. 验证**
 
@@ -174,9 +176,41 @@ IMAGE=registry.cn-hangzhou.aliyuncs.com/kuducrud/kudu-console:v1.0.4
 
 > 阿里云个人版仓库默认私有，服务器需要 `docker login` 一次；固定密码不会过期。
 
-#### 七、完全断网 / 拿不到镜像
+#### 七、首次拉取太慢 / 完全断网
 
-用 Release 里的离线包，`docker load` 导入即可，步骤见 [DEPLOY.md](DEPLOY.md) 的「目标机器上不了外网」。
+绕过 ghcr.io 的首次全量下载，但**不放弃后续的增量更新**——这是推荐给国内网络的做法。
+
+**1. 在有网的机器上下载离线包**（这台 Windows 就行）
+
+```bash
+# 文件名带版本号，到 Releases 页面拿实际链接
+curl -fL -O https://github.com/999bug/kudu-crud/releases/download/v1.0.5/kudu-console-image-v1.0.5.tar.gz
+scp kudu-console-image-v1.0.5.tar.gz root@<服务器IP>:/tmp/
+```
+
+**2. 服务器上导入并启动**
+
+```bash
+gunzip -c /tmp/kudu-console-image-v1.0.5.tar.gz | docker load
+docker images | grep kudu-console          # 应能看到 ghcr.io/... 和 kudu-console 两个名字
+cd /opt/kudu-console
+docker compose -f docker-compose.prod.yml up -d
+```
+
+包里同时打进了 `ghcr.io/999bug/kudu-console:v1.0.5` 和 `kudu-console:v1.0.5` 两个 tag，和 `.env` 里的 `IMAGE` 对得上，**不需要再 `docker tag`**。
+
+**3. 之后照常增量更新**
+
+```bash
+docker compose -f docker-compose.prod.yml pull
+docker compose -f docker-compose.prod.yml up -d
+```
+
+本地已有的层和 registry 上的层 digest 一致，`pull` 会直接跳过它们，只下变化的那 0.17MB。所以「离线起步 + 在线增量」是可以长期共存的，不会因为导入过离线包就断了更新链路。
+
+> 完全隔离的内网环境（连 ghcr.io 都不通）就每版都用离线包覆盖，做法一样，只是每次要换文件名。
+
+更完整的离线方案见 [DEPLOY.md](DEPLOY.md) 的「目标机器上不了外网」。
 
 #### 八、从源码构建（开发用）
 
