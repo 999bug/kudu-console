@@ -62,7 +62,7 @@ IMAGE=ghcr.io/999bug/kudu-console:v1.0.1
 docker compose -f docker-compose.prod.yml up -d
 ```
 
-首次拉镜像约 144MB，国内通常 1~3 分钟。
+首次要拉完整镜像（约 144MB，含 JRE 与全部依赖），耗时取决于到 ghcr.io 的网络。慢的话挂着让它跑就行——`docker pull` 按层下载，中断后重试会复用已完成的层，不会从头再来。
 
 **4. 验证**
 
@@ -93,6 +93,8 @@ docker compose -f docker-compose.prod.yml up -d
 ```
 
 `up -d` 发现镜像变了会自动重建容器，`data/` 里的配置和日志不受影响。
+
+**是增量下载**：镜像按 Spring Boot 分层构建，依赖（35MB）和业务代码（约 1MB）是不同的层。只改业务代码时，`pull` 只下 1MB 左右，不会重传依赖。只有改 `pom.xml` 或基础镜像才会动到大层。
 
 想彻底不用管，挂个 cron 每 5 分钟检查一次：
 
