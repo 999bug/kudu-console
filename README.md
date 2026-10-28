@@ -63,15 +63,13 @@ docker compose down                   # 停止并删除容器（挂载目录不�
 
 `release/` 为空时容器会用镜像内置的 jar 启动，首次部署不需要手动准备 jar。
 
-镜像模式下更新代码是四步：
+镜像模式下更新代码只有两步：
 
 ```bash
-# 1. 本地改完提交、推 main
+# 1. 推代码，流水线自动构建、打 tag、发布
 git push origin main
-# 2. 打 tag 触发构建（Release 出 jar，Docker Image 出镜像）
-git tag v1.0.2 && git push origin v1.0.2
-# 3. 等 Actions 两个工作流变绿
-# 4. 服务器上拉新镜像重建容器
+
+# 2. 服务器上拉新镜像（也可以交给 cron 全自动，见 DEPLOY.md）
 docker compose -f docker-compose.prod.yml pull
 docker compose -f docker-compose.prod.yml up -d
 ```
@@ -261,21 +259,28 @@ KUDU_CONSOLE_URL=http://localhost:9090 python tools/api-smoke.py
 
 这个项目不是静态站点，**GitHub Pages 部署不了**（跑不了 JVM，也连不到内网 Kudu）。GitHub 负责源码托管 + 自动出包，进程必须跑在能访问 Kudu master 的机器上。
 
-```bash
-git tag v1.0.1 && git push origin v1.0.1    # 触发 Actions，产出 jar + sha256 到 Release
-```
-
-服务器上在线升级（版本比对 → 校验 → 原子替换 → 起不来自动回滚）：
+**push 即发版**，不用手动打 tag：
 
 ```bash
-cd /opt/kudu-console && ./deploy/upgrade.sh
+git push origin main
 ```
 
-Docker 一键起服务：
+流水线会自动跑测试 → 构建前端 → 打包 jar → 构建容器镜像 → 自动打版本 tag（`v1.0.<run_number>`）→ 发布 Release（jar + sha256 + 离线镜像包）。
+
+服务器上更新：
 
 ```bash
-cp .env.example .env && vi .env
-docker compose up -d --build
+cd /opt/kudu-console
+docker compose -f docker-compose.prod.yml pull
+docker compose -f docker-compose.prod.yml up -d
 ```
+
+想彻底不用管，挂个 cron 每 5 分钟检查一次新镜像：
+
+```cron
+*/5 * * * * cd /opt/kudu-console && docker compose -f docker-compose.prod.yml pull -q && docker compose -f docker-compose.prod.yml up -d >> logs/auto-update.log 2>&1
+```
+
+要指定版本号就手动打 tag：`git tag v1.0.5 && git push origin v1.0.5`，或用 Actions 手动触发。
 
 完整的三种上线方式、公网暴露与鉴权（Cloudflare Tunnel / Caddy）、回滚与巡检配置见 **[DEPLOY.md](DEPLOY.md)**。

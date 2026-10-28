@@ -2,11 +2,11 @@
 #
 # 前端产物直接写进 src/main/resources/static/，所以顺序必须是 npm build → mvn package，
 # 否则打出来的 jar 里没有页面（该目录不入库，由构建生成）。
+# push 到 main 由 Release 流水线负责（它跑同一套构建与测试），
+# 这里只守 PR 和手动触发，避免每次 push 跑两遍。
 name: CI
 
 on:
-  push:
-    branches: [main]
   pull_request:
   workflow_dispatch:
 

@@ -224,19 +224,25 @@ git clone /tmp/kudu-crud.bundle kudu-crud
 
 ### 发版
 
+**push main 就发版**，不需要手动打 tag：
+
 ```bash
-git tag v1.0.1
-git push origin v1.0.1
+git push origin main
 ```
 
-push tag 会同时触发两个工作流：
+`Release` 流水线会依次做完：跑测试 → 构建前端 → 打包 jar → 构建容器镜像 → 推送 ghcr.io → 自动打版本 tag（`v1.0.<run_number>`）→ 发布 Release。
 
-| 工作流 | 产物 | 用途 |
-| --- | --- | --- |
-| `release.yml` | `kudu-console.jar` + `.sha256` | 直接 `java -jar`，或给 `upgrade.sh` 在线升级 |
-| `docker-image.yml` | `ghcr.io/999bug/kudu-console:<tag>`，以及离线包 `kudu-console-image-<tag>.tar.gz` | Docker 部署与升级 |
+产物：
 
-两个都绿了、Release 页能看到附件，才算发版完成。也可以手动触发：Actions → 选工作流 → Run workflow。
+| 产物 | 用途 |
+| --- | --- |
+| `kudu-console.jar` + `.sha256` | 直接 `java -jar`，或给 `upgrade.sh` 在线升级 |
+| `ghcr.io/999bug/kudu-console:<tag>` 与 `:latest` | Docker 部署与升级 |
+| `kudu-console-image-<tag>.tar.gz` | 完全离线时 `docker load` |
+
+要指定版本号，就在本地打 tag 推上去（`git tag v1.0.5 && git push origin v1.0.5`），或 Actions → Release → Run workflow 手填。
+
+Release 只保留最近 20 个，更早的自动清理，tag 全部保留。
 
 ### 服务器升级
 
@@ -285,30 +291,33 @@ cp .env.example .env && vi .env
 docker compose -f docker-compose.prod.yml up -d
 ```
 
-**以后每次更新代码，完整链路是四步：**
+**以后更新代码只有两步：**
 
-1. 本地改代码，提交并推 main（触发 CI 跑测试）：
+1. 推代码（流水线自动测试、构建、打 tag、发布）：
 
 ```bash
 git add <改动文件> && git commit -m "说明"
 git push origin main
 ```
 
-2. 打新 tag 并推送（触发 Release + Docker Image）：
-
-```bash
-git tag v1.0.2
-git push origin v1.0.2
-```
-
-3. 等 Actions 里 `Release` 和 `Docker Image` 都变绿。
-
-4. 到服务器上拉新镜像并重建容器：
+2. 服务器上拉新镜像并重建容器：
 
 ```bash
 cd /opt/kudu-console
 docker compose -f docker-compose.prod.yml pull
 docker compose -f docker-compose.prod.yml up -d
+```
+
+**想彻底不用管，交给 cron 全自动**（每 5 分钟检查一次，有新镜像就换）：
+
+```cron
+*/5 * * * * cd /opt/kudu-console && docker compose -f docker-compose.prod.yml pull -q && docker compose -f docker-compose.prod.yml up -d >> logs/auto-update.log 2>&1
+```
+
+注意：cron 方案必须用 `:latest`，固定版本号不会被动更新。如果新版本起不来，容器会反复重启——所以更稳的做法是 cron 只做 `pull`，`up -d` 留给你确认后手动执行：
+
+```cron
+*/5 * * * * cd /opt/kudu-console && docker compose -f docker-compose.prod.yml pull -q >> logs/auto-pull.log 2>&1
 ```
 
 `up -d` 发现镜像 digest 变了会自动重建容器；`data/config`、`data/logs` 是挂载卷，配置和日志不会丢。全程不碰源码，也不需要 JDK / Maven / Node。

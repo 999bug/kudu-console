@@ -1,32 +1,59 @@
-# 发布：打 tag 即产出可下载的 jar + 校验和，供服务器上的 upgrade.sh 在线升级
+# 发布流水线：push main = 自动打 tag + 构建 jar + 构建镜像 + 出 Release
 #
-# 用法：
-#   git tag v1.0.1 && git push origin v1.0.1
-#   或 Actions → Release → Run workflow → 填版本号（如 v1.0.1）
+# 触发：
+#   push 到 main        → 自动版本 v1.0.<run_number>，打 tag 并发布
+#   push tag v*         → 用该 tag 发布（手动指定版本的场景）
+#   workflow_dispatch   → 可手填版本号
 #
-# 产物：kudu-console.jar、kudu-console.jar.sha256
-# 升级端只认 sha256 对得上的 jar，下载损坏不会覆盖线上旧版。
+# 产物：
+#   kudu-console.jar / .sha256                      直接 java -jar 或 upgrade.sh
+#   ghcr.io/999bug/kudu-console:<tag> 与 :latest     docker pull
+#   kudu-console-image-<tag>.tar.gz                 完全离线时 docker load
+#
+# 部署端更新代码：docker compose -f docker-compose.prod.yml pull && up -d
 name: Release
 
 on:
   push:
+    branches: [main]
     tags: ['v*']
   workflow_dispatch:
     inputs:
       version:
-        description: '版本号，例如 v1.0.1（留空则用 pom 版本）'
+        description: '版本号（如 v1.0.5）；留空则自动 v1.0.<run_number>'
         required: false
         type: string
 
 permissions:
-  contents: write
+  contents: write   # 打 tag、建 Release
+  packages: write   # 推 ghcr.io
+
+# 同一分支不并发发布，避免两个 run 抢同一个版本号
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
-  release:
+  publish:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Resolve version
+        id: ver
+        run: |
+          if [ "$GITHUB_REF_TYPE" = "tag" ]; then
+            V="$GITHUB_REF_NAME"
+          elif [ -n "${{ inputs.version }}" ]; then
+            V="${{ inputs.version }}"
+          else
+            V="v1.0.${GITHUB_RUN_NUMBER}"
+          fi
+          echo "value=$V" >> "$GITHUB_OUTPUT"
+          echo "本次版本: $V"
 
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -45,10 +72,13 @@ jobs:
       - name: Build frontend
         working-directory: web
         run: |
-          npm ci
+          npm ci --no-audit --no-fund
           npm run build
 
-      - name: Test backend
+      - name: Verify frontend output
+        run: test -f src/main/resources/static/index.html
+
+      - name: Test
         run: mvn -B test
 
       - name: Package
@@ -60,27 +90,76 @@ jobs:
           sha256sum kudu-console.jar > kudu-console.jar.sha256
           cat kudu-console.jar.sha256
 
-      # tag 触发用 tag 名；手动触发用输入值，缺省回落到 pom 版本
-      - name: Resolve version
-        id: ver
-        run: |
-          if [ "${{ github.event_name }}" = "push" ]; then
-            echo "tag=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
-          elif [ -n "${{ inputs.version }}" ]; then
-            echo "tag=${{ inputs.version }}" >> "$GITHUB_OUTPUT"
-          else
-            V=$(mvn -B -q help:evaluate -Dexpression=project.version -DforceStdout)
-            echo "tag=v${V}" >> "$GITHUB_OUTPUT"
-          fi
+      - name: Setup Buildx
+        uses: docker/setup-buildx-action@v3
 
-      - name: Create release
+      - name: Login to ghcr.io
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/kudu-console:${{ steps.ver.outputs.value }}
+            ghcr.io/${{ github.repository_owner }}/kudu-console:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Make package public
+        continue-on-error: true
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          TAG="${{ steps.ver.outputs.tag }}"
-          gh release create "$TAG" \
+          gh api --method PATCH "/user/packages/container/kudu-console" \
+            -f visibility=public || true
+
+      - name: Export offline image
+        run: |
+          V="${{ steps.ver.outputs.value }}"
+          IMG="ghcr.io/${{ github.repository_owner }}/kudu-console:$V"
+          docker pull "$IMG"
+          docker tag "$IMG" "kudu-console:$V"
+          docker save "kudu-console:$V" | gzip -1 > "kudu-console-image-$V.tar.gz"
+          ls -lh "kudu-console-image-$V.tar.gz"
+
+      # push 分支时补一个 tag，回滚时能按版本号 checkout；
+      # GITHUB_TOKEN 推的 tag 不会再触发 workflow，不会递归
+      - name: Push tag
+        if: github.ref_type == 'branch'
+        run: |
+          V="${{ steps.ver.outputs.value }}"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag "$V" 2>/dev/null || echo "本地 tag 已存在"
+          git push origin "$V" 2>/dev/null || echo "远端 tag 已存在"
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          V="${{ steps.ver.outputs.value }}"
+          gh release view "$V" >/dev/null 2>&1 \
+            || gh release create "$V" --title "$V" --generate-notes
+          gh release upload "$V" \
             target/kudu-console.jar \
             target/kudu-console.jar.sha256 \
-            --title "$TAG" \
-            --generate-notes \
-            --latest
+            "kudu-console-image-$V.tar.gz" \
+            --clobber
+
+      # Release 会随每次 push 增长，只保留最近 20 个（tag 全部保留）
+      - name: Prune old releases
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release list --limit 100 --json tagName --jq '.[].tagName' \
+            | tail -n +21 \
+            | while read -r t; do
+                [ -n "$t" ] && gh release delete "$t" --yes
+              done
