@@ -229,9 +229,14 @@ git tag v1.0.1
 git push origin v1.0.1
 ```
 
-push tag 触发 `.github/workflows/release.yml`：跑测试 → 构建前端 → 打包 → 上传 `kudu-console.jar` 和 `.sha256` 到 Release。
+push tag 会同时触发两个工作流：
 
-也可以手动：Actions → Release → Run workflow → 填 `v1.0.1`。
+| 工作流 | 产物 | 用途 |
+| --- | --- | --- |
+| `release.yml` | `kudu-console.jar` + `.sha256` | 直接 `java -jar`，或给 `upgrade.sh` 在线升级 |
+| `docker-image.yml` | `ghcr.io/999bug/kudu-console:<tag>`，以及离线包 `kudu-console-image-<tag>.tar.gz` | Docker 部署与升级 |
+
+两个都绿了、Release 页能看到附件，才算发版完成。也可以手动触发：Actions → 选工作流 → Run workflow。
 
 ### 服务器升级
 
@@ -269,9 +274,66 @@ CHECK_ONLY=1 ./deploy/upgrade.sh   # 有新版本时退出码 10
 ./deploy/upgrade.sh v1.0.0
 ```
 
-### Docker 场景
+### 方式一：镜像部署（推荐，服务器不需要源码/JDK）
 
-`docker-compose.yml` 把宿主机的 `release/` 目录挂到容器 `/app/release`，`upgrade.sh` 会把新 jar 落到那里，所以升级流程完全一样：
+用 `docker-compose.prod.yml`，它只认镜像，不读源码。
+
+首次部署：
+
+```bash
+cp .env.example .env && vi .env
+docker compose -f docker-compose.prod.yml up -d
+```
+
+**以后每次更新代码，完整链路是四步：**
+
+1. 本地改代码，提交并推 main（触发 CI 跑测试）：
+
+```bash
+git add <改动文件> && git commit -m "说明"
+git push origin main
+```
+
+2. 打新 tag 并推送（触发 Release + Docker Image）：
+
+```bash
+git tag v1.0.2
+git push origin v1.0.2
+```
+
+3. 等 Actions 里 `Release` 和 `Docker Image` 都变绿。
+
+4. 到服务器上拉新镜像并重建容器：
+
+```bash
+cd /opt/kudu-console
+docker compose -f docker-compose.prod.yml pull
+docker compose -f docker-compose.prod.yml up -d
+```
+
+`up -d` 发现镜像 digest 变了会自动重建容器；`data/config`、`data/logs` 是挂载卷，配置和日志不会丢。全程不碰源码，也不需要 JDK / Maven / Node。
+
+**生产环境建议固定版本号**，别用 `:latest`，否则每次 `up -d` 都可能在你没预期的时候换版本。在 `.env` 里写：
+
+```env
+IMAGE=ghcr.io/999bug/kudu-console:v1.0.2
+```
+
+升级就是把这个号改掉再 `up -d`；**回滚就是把号改回上一个版本**，同样一条命令。
+
+**先确认服务器能不能访问镜像仓库：**
+
+```bash
+curl -I https://ghcr.io/v2/                      # 只要不是连接超时就算通
+docker pull ghcr.io/999bug/kudu-console:latest   # 匿名拉公共包
+```
+
+- 返回 `denied` / `unauthorized` → 包还是私有的，去 GitHub 个人主页 → Packages → kudu-console → Package settings 改成 Public
+- 连接超时 / reset → 走上一节的离线镜像包，或给 Docker 配代理
+
+### 方式二：jar + systemd
+
+`docker-compose.yml` 把宿主机的 `release/` 目录挂到容器 `/app/release`，`upgrade.sh` 会把新 jar 落到那里，所以升级流程和 systemd 一样：
 
 ```bash
 cd /opt/kudu-console

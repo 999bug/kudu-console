@@ -48,13 +48,35 @@ docker compose restart kudu-console   # 重启
 docker compose down                   # 停止并删除容器（挂载目录不受影响）
 ```
 
-**升级**：`release/` 是 jar 的投放目录，把新版本放进去再重启即可；用脚本会更省事（自动校验 + 失败回滚，见 [DEPLOY.md](DEPLOY.md)）：
+**升级**：两种跑法对应两种升级方式。
+
+| 编排文件 | 镜像来源 | 适用场景 |
+| --- | --- | --- |
+| `docker-compose.yml` | 本地源码构建 | 开发机；内网拿不到镜像仓库 |
+| `docker-compose.prod.yml` | 拉取 `ghcr.io` 镜像 | 服务器；不需要源码、JDK、Maven、Node |
+
+源码模式下 `release/` 是 jar 的投放目录，把新版本放进去再重启即可；用脚本更省事（自动校验 + 失败回滚，见 [DEPLOY.md](DEPLOY.md)）：
 
 ```bash
 ./deploy/upgrade.sh
 ```
 
-`release/` 为空时容器会用镜像内置的 jar 启动，所以首次部署不需要手动准备 jar。
+`release/` 为空时容器会用镜像内置的 jar 启动，首次部署不需要手动准备 jar。
+
+镜像模式下更新代码是四步：
+
+```bash
+# 1. 本地改完提交、推 main
+git push origin main
+# 2. 打 tag 触发构建（Release 出 jar，Docker Image 出镜像）
+git tag v1.0.2 && git push origin v1.0.2
+# 3. 等 Actions 两个工作流变绿
+# 4. 服务器上拉新镜像重建容器
+docker compose -f docker-compose.prod.yml pull
+docker compose -f docker-compose.prod.yml up -d
+```
+
+`data/config`、`data/logs` 是挂载卷，配置和日志不随容器重建丢失。生产环境建议在 `.env` 里固定 `IMAGE=ghcr.io/999bug/kudu-console:v1.0.2`，回滚就是改回旧版本号再 `up -d`。
 
 **公网访问**：不占公网 IP、不开端口，走 Cloudflare 隧道：
 
