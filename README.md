@@ -143,11 +143,42 @@ docker compose -f docker-compose.prod.yml --profile tunnel up -d
 
 **务必同时配 Access 策略**（邮箱白名单）。这个控制台没有登录鉴权，能删表删库，裸挂公网等于把数据库交出去。
 
-#### 六、完全断网 / 拿不到镜像
+#### 六、国内镜像仓库（可选）
+
+ghcr.io 在国外，首次拉 139MB 会慢。可以同步一份到国内的容器仓库，之后从国内拉。以阿里云 ACR 为例（个人版免费）：
+
+1. 阿里云控制台 → 容器镜像服务 → 开通个人版 → 创建命名空间（如 `kuducrud`）
+2. 该命名空间 → 访问凭证 → 设置**固定密码**（不是临时 token，不会过期）
+3. GitHub 仓库 → Settings → Secrets and variables → Actions，添加四个：
+
+| Secret 名称 | 值 |
+| --- | --- |
+| `ACR_REGISTRY` | `registry.cn-hangzhou.aliyuncs.com`（按你选的地域） |
+| `ACR_NAMESPACE` | 命名空间，如 `kuducrud` |
+| `ACR_USERNAME` | 阿里云账号全名或 RAM 用户名 |
+| `ACR_PASSWORD` | 第 2 步设置的固定密码 |
+
+配好后下次 push 会自动同步一份过去，Actions 日志里能看到 `已同步到 ...`。没配就自动跳过，不影响 ghcr 主链路。
+
+服务器上换成国内地址：
+
+```bash
+docker login registry.cn-hangzhou.aliyuncs.com
+```
+
+```env
+IMAGE=registry.cn-hangzhou.aliyuncs.com/kuducrud/kudu-console:v1.0.4
+```
+
+腾讯云 TCR（`ccr.ccs.tencentyun.com`）、华为云 SWR 用的是同一套 Docker Registry 协议，把 `ACR_REGISTRY` 换成对应域名即可。
+
+> 阿里云个人版仓库默认私有，服务器需要 `docker login` 一次；固定密码不会过期。
+
+#### 七、完全断网 / 拿不到镜像
 
 用 Release 里的离线包，`docker load` 导入即可，步骤见 [DEPLOY.md](DEPLOY.md) 的「目标机器上不了外网」。
 
-#### 七、从源码构建（开发用）
+#### 八、从源码构建（开发用）
 
 上面都是拉现成镜像。要在本机构建镜像，用另一套编排：
 
