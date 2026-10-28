@@ -126,6 +126,98 @@ sudo systemctl reload caddy
 
 ---
 
+## 目标机器上不了外网 / 访问不了 GitHub
+
+**不要在目标机器上 clone 源码构建**——那台机器既要装 JDK + Node + Maven，拉 Maven 依赖时照样会卡在网络上。正确做法是在有网的机器上拿构建好的产物，只把产物传过去。
+
+先看目标机器有什么：
+
+| 目标机器环境 | 拿什么 | 怎么传 |
+| --- | --- | --- |
+| 有 JDK 17 | `kudu-console.jar` | scp / 共享目录 / U 盘 |
+| 有 Docker，能连 registry | 直接 pull 镜像 | `docker pull` |
+| 有 Docker，完全断网 | 镜像离线包 `tar.gz` | 下载后 `docker load` |
+
+产物都在 Release 页：`https://github.com/999bug/kudu-crud/releases`
+
+### A. 只需 JDK：直接跑 jar
+
+```bash
+# 有网的机器上下载
+curl -fL -O https://github.com/999bug/kudu-crud/releases/latest/download/kudu-console.jar
+
+scp kudu-console.jar user@目标机:/opt/kudu-console/
+
+# 目标机器
+cd /opt/kudu-console
+java -jar kudu-console.jar --server.port=8088 \
+  --kudu-console.masters=192.168.46.23:7051,192.168.46.23:7151,192.168.46.23:7251
+```
+
+长期跑用前面「方式 C」的 systemd unit，把 `ExecStart` 指到这个 jar 即可。
+
+### B. 能连 ghcr.io：直接拉镜像
+
+镜像由 `.github/workflows/docker-image.yml` 在打 tag 时自动构建推送，内含 JRE、前端页面和全部依赖。
+
+```bash
+docker run -d --name kudu-console \
+  -p 8088:8088 \
+  -e KUDUCONSOLE_MASTERS=192.168.46.23:7051,192.168.46.23:7151,192.168.46.23:7251 \
+  -v /opt/kudu-console/config:/app/config \
+  -v /opt/kudu-console/logs:/app/logs \
+  --restart unless-stopped \
+  ghcr.io/999bug/kudu-console:latest
+```
+
+> 国内直连 ghcr.io 通常很慢或不通。通了就用，不通走下面的离线包。
+> 如果 `docker pull` 报 `denied`，说明包还是私有的，去
+> GitHub → 个人主页 → Packages → kudu-console → Package settings 改成 Public。
+
+### C. 完全断网：离线镜像包
+
+```bash
+# 有网的机器下载（约 400~600 MB）
+curl -fLO https://github.com/999bug/kudu-crud/releases/download/v1.0.1/kudu-console-image-v1.0.1.tar.gz
+
+scp kudu-console-image-v1.0.1.tar.gz user@目标机:/tmp/
+
+# 目标机器：导入并启动
+gunzip -c /tmp/kudu-console-image-v1.0.1.tar.gz | docker load
+docker run -d --name kudu-console \
+  -p 8088:8088 \
+  -e KUDUCONSOLE_MASTERS=192.168.46.23:7051,192.168.46.23:7151,192.168.46.23:7251 \
+  -v /opt/kudu-console/config:/app/config \
+  -v /opt/kudu-console/logs:/app/logs \
+  --restart unless-stopped \
+  kudu-console:v1.0.1
+```
+
+升级就是重复「下载新包 → 传到目标机 → `docker load` → `docker rm -f kudu-console` → 用新 tag 重新 run」。想少敲命令，把 `docker run` 那串写进一个 `run.sh`。
+
+### D. 仍然想 clone 源码
+
+镜像站（第三方服务，可用性随时变化，能通就用）：
+
+```bash
+git clone https://ghfast.top/https://github.com/999bug/kudu-crud.git
+git clone https://ghproxy.net/https://github.com/999bug/kudu-crud.git
+git clone https://kkgithub.com/999bug/kudu-crud.git
+```
+
+或者在有网的机器上打成 bundle 带过去，这样走的是完整 git 历史：
+
+```bash
+git bundle create kudu-crud.bundle --all
+scp kudu-crud.bundle user@目标机:/tmp/
+# 目标机器
+git clone /tmp/kudu-crud.bundle kudu-crud
+```
+
+再次提醒：clone 只解决"拿到源码"，构建仍要 JDK、Node、Maven 和能访问 Maven 中央仓库的网络。内网环境请优先用 A / B / C。
+
+---
+
 ## 在线升级
 
 思路和前端项目的 Service Worker 静默更新一致：**版本比对 → 校验通过才落盘 → 起不来自动回滚**。

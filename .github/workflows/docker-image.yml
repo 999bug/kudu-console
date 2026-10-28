@@ -1,0 +1,99 @@
+# 构建容器镜像并分发，供无法访问 GitHub 的机器直接使用
+#
+# 触发：push tag v*，或手动 Run workflow
+# 产物：
+#   1. ghcr.io/999bug/kudu-console:<tag> 与 :latest —— 能访问 ghcr.io 时直接 pull
+#   2. kudu-console-image.tar.gz 挂到 Release —— 完全离线时下载后 docker load
+#
+# 镜像内已包含 JRE、前端静态页和全部依赖，运行时不需要 JDK / Maven / Node。
+name: Docker Image
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: '镜像标签，例如 v1.0.1（留空用提交短 SHA）'
+        required: false
+        type: string
+
+permissions:
+  contents: write   # 上传 Release 附件
+  packages: write   # 推送 ghcr.io
+
+jobs:
+  image:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Resolve tag
+        id: tag
+        run: |
+          if [ "${{ github.event_name }}" = "push" ]; then
+            echo "value=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+          elif [ -n "${{ inputs.tag }}" ]; then
+            echo "value=${{ inputs.tag }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "value=sha-${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to ghcr.io
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # 构建并推送。Dockerfile 是三阶段（node → maven → jre），
+      # 缓存放 GitHub Actions 后端，重复构建能省掉大部分 Maven 下载
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/kudu-console:${{ steps.tag.outputs.value }}
+            ghcr.io/${{ github.repository_owner }}/kudu-console:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # 包默认是私有的，改成公开后目标机器不用登录也能 pull
+      - name: Make package public
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh api --method PATCH \
+            "/user/packages/container/kudu-console" \
+            -f visibility=public || true
+
+      # 离线包：目标机器访问不了任何 registry 时，用 U 盘/共享目录传这个文件
+      - name: Export offline image
+        run: |
+          TAG="${{ steps.tag.outputs.value }}"
+          docker pull "ghcr.io/${{ github.repository_owner }}/kudu-console:$TAG"
+          docker tag "ghcr.io/${{ github.repository_owner }}/kudu-console:$TAG" "kudu-console:$TAG"
+          docker save "kudu-console:$TAG" | gzip -1 > "kudu-console-image-$TAG.tar.gz"
+          ls -lh "kudu-console-image-$TAG.tar.gz"
+          echo "ARTIFACT=kudu-console-image-$TAG.tar.gz" >> "$GITHUB_ENV"
+
+      # 手动触发时没有对应 Release，先建一个再挂附件
+      - name: Ensure release exists
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release view "${{ steps.tag.outputs.value }}" >/dev/null 2>&1 \
+            || gh release create "${{ steps.tag.outputs.value }}" \
+                 --title "${{ steps.tag.outputs.value }}" --generate-notes
+
+      - name: Upload offline image to release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release upload "${{ steps.tag.outputs.value }}" "$ARTIFACT" --clobber
