@@ -23,6 +23,47 @@
 
 ## 快速开始
 
+### Docker（服务器部署推荐）
+
+宿主只需 Docker + Docker Compose，不用装 JDK / Maven / Node —— 镜像里三阶段构建已经做完了。
+
+```bash
+cp .env.example .env          # 改 KUDU_MASTERS，需要时改 HOST_PORT
+docker compose up -d --build  # 首次约 3~8 分钟，主要在拉 Maven 依赖
+docker compose logs -f kudu-console
+```
+
+浏览器打开 `http://<机器IP>:8088/`，集群状态页能出 LEADER / FOLLOWER 就是通了。
+
+```bash
+curl -s http://127.0.0.1:8088/api/cluster/status | head -c 200   # 命令行验证
+```
+
+日常操作：
+
+```bash
+docker compose ps                     # 状态
+docker compose restart kudu-console   # 重启
+docker compose down                   # 停止并删除容器（挂载目录不受影响）
+```
+
+**升级**：`release/` 是 jar 的投放目录，把新版本放进去再重启即可；用脚本会更省事（自动校验 + 失败回滚，见 [DEPLOY.md](DEPLOY.md)）：
+
+```bash
+./deploy/upgrade.sh
+```
+
+`release/` 为空时容器会用镜像内置的 jar 启动，所以首次部署不需要手动准备 jar。
+
+**公网访问**：不占公网 IP、不开端口，走 Cloudflare 隧道：
+
+```bash
+# 先在 .env 填 TUNNEL_TOKEN，并到 Zero Trust 配好 Public Hostname 与 Access 策略
+docker compose --profile tunnel up -d
+```
+
+状态与日志落在 `./data/config`、`./data/logs`，容器重建不丢。
+
 ### Windows
 
 ```bat
@@ -54,6 +95,7 @@ chmod +x start.sh build.sh
 
 - JDK 17
 - 仅构建时需要：Maven 3.6+、Node.js 18+
+- 仅 Docker 方式：Docker 20.10+ 与 Compose v2，无需上面三项
 
 运行日志写在 `logs/kudu-console.log`；平台清单写在 `config/clusters.json`（两者都不入库）。
 

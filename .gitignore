@@ -18,5 +18,9 @@ config/*.json
 # 本地验证脚本与截图
 .shots/
 
+# Docker 部署产物：release 放 jar，data 挂载配置与日志
+release/
+data/
+
 # Agent 工作目录（会话记忆，不入库）
 .workbuddy/

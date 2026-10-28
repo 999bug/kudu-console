@@ -1,7 +1,7 @@
 # 内网机器上一条命令起服务：docker compose up -d --build
 #
-# jar 挂载到容器里，升级时只需替换宿主机的 kudu-console.jar 再 restart，
-# 不用重新构建镜像（deploy/upgrade.sh 就是干这个的）。
+# 升级时只需把新 jar 放进 ./release/ 再 restart，不必重建镜像
+# （deploy/upgrade.sh 就是干这个的）。release/ 为空时用镜像内置版本。
 services:
   kudu-console:
     build: .
@@ -16,12 +16,13 @@ services:
       JAVA_OPTS: "${JAVA_OPTS:--Xms256m -Xmx1g}"
       TZ: Asia/Shanghai
     volumes:
-      # 首次启动前若 jar 不存在，容器用镜像内置版本；放入新 jar 后 restart 即生效
-      - ./kudu-console.jar:/app/app.jar:ro
+      # 挂目录而不是单个文件：宿主端文件不存在时 Docker 会把 bind 源建成目录，
+      # 挂成目录会导致 java -jar 失败。目录挂载没有这个坑。
+      - ./release:/app/release:ro
       - ./data/config:/app/config
       - ./data/logs:/app/logs
     healthcheck:
-      test: ["CMD-SHELL", "curl -fsS http://localhost:8088/api/cluster/status || exit 1"]
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8088/ >/dev/null || exit 1"]
       interval: 30s
       timeout: 5s
       start_period: 40s

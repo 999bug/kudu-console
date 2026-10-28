@@ -179,7 +179,7 @@ CHECK_ONLY=1 ./deploy/upgrade.sh   # 有新版本时退出码 10
 
 ### Docker 场景
 
-`docker-compose.yml` 把宿主机的 `kudu-console.jar` 以只读方式挂进容器，所以升级流程完全一样：
+`docker-compose.yml` 把宿主机的 `release/` 目录挂到容器 `/app/release`，`upgrade.sh` 会把新 jar 落到那里，所以升级流程完全一样：
 
 ```bash
 cd /opt/kudu-console

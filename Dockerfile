@@ -18,14 +18,16 @@ RUN mvn -B -DskipTests package
 
 FROM eclipse-temurin:17-jre
 WORKDIR /app
-# curl 供 docker-compose 的 healthcheck 使用
+# curl 供 healthcheck 和排障使用
 RUN apt-get update \
  && apt-get install -y --no-install-recommends curl \
  && rm -rf /var/lib/apt/lists/*
-COPY --from=backend /build/target/kudu-console.jar /app/app.jar
-RUN mkdir -p /app/config /app/logs
+COPY --from=backend /build/target/kudu-console.jar /app/builtin.jar
+RUN mkdir -p /app/config /app/logs /app/release
 EXPOSE 8088
 ENV JAVA_OPTS="-Xms256m -Xmx1g"
 HEALTHCHECK --interval=30s --timeout=5s --start-period=40s --retries=3 \
-  CMD java -version >/dev/null 2>&1 || exit 1
-ENTRYPOINT ["sh", "-c", "exec java $JAVA_OPTS -jar /app/app.jar"]
+  CMD curl -fsS http://localhost:8088/ >/dev/null || exit 1
+# /app/release/kudu-console.jar 由宿主机挂载进来自定义版本；
+# 没有（首次部署或 release 目录为空）就用镜像内置的 builtin.jar，不会因为缺文件起不来
+ENTRYPOINT ["sh", "-c", "JAR=/app/release/kudu-console.jar; [ -f \"$JAR\" ] || JAR=/app/builtin.jar; exec java $JAVA_OPTS -jar \"$JAR\""]

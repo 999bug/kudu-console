@@ -17,12 +17,12 @@
 #   APP_DIR    默认 /opt/kudu-console
 #   SERVICE    systemd 服务名，默认 kudu-console；设为空则跳过重启
 #   MODE       systemd | docker，默认自动判断
+#   JAR        显式指定 jar 落盘路径，默认按 MODE 推导
 set -euo pipefail
 
 REPO="${REPO:-999bug/kudu-crud}"
 APP_DIR="${APP_DIR:-/opt/kudu-console}"
 SERVICE="${SERVICE:-kudu-console}"
-JAR="$APP_DIR/kudu-console.jar"
 VERSION_FILE="$APP_DIR/VERSION"
 CHECK_ONLY="${CHECK_ONLY:-0}"
 
@@ -30,6 +30,25 @@ log() { printf '[%s] %s\n' "$(date '+%F %T')" "$*"; }
 die() { log "错误: $*" >&2; exit 1; }
 
 command -v curl >/dev/null 2>&1 || die "需要 curl"
+
+# ---------- 0. 判断运行方式，决定 jar 放哪 ----------
+MODE="${MODE:-}"
+if [ -z "$MODE" ]; then
+  if [ -f "$APP_DIR/docker-compose.yml" ] || [ -f "$APP_DIR/compose.yaml" ]; then
+    MODE="docker"
+  else
+    MODE="systemd"
+  fi
+fi
+
+if [ -n "${JAR:-}" ]; then
+  : # 调用方指定
+elif [ "$MODE" = "docker" ]; then
+  # docker-compose 把宿主机的 ./release 挂到容器 /app/release
+  JAR="$APP_DIR/release/kudu-console.jar"
+else
+  JAR="$APP_DIR/kudu-console.jar"
+fi
 
 # ---------- 1. 解析目标版本 ----------
 CURRENT="$(cat "$VERSION_FILE" 2>/dev/null || echo 'v0.0.0')"
@@ -43,7 +62,7 @@ else
   [ -n "${TARGET:-}" ] || die "拿不到最新版本号，检查网络或仓库是否已有 Release"
 fi
 
-log "当前版本: $CURRENT    目标版本: $TARGET"
+log "当前版本: $CURRENT    目标版本: $TARGET    MODE=$MODE    JAR=$JAR"
 
 if [ "$CURRENT" = "$TARGET" ]; then
   log "已是最新，无需升级"
@@ -80,7 +99,7 @@ else
 fi
 
 # ---------- 3. 备份 + 原子替换 ----------
-mkdir -p "$APP_DIR"
+mkdir -p "$(dirname "$JAR")"
 if [ -f "$JAR" ]; then
   cp -p "$JAR" "$JAR.bak.$(date +%s)"
 fi
@@ -91,15 +110,6 @@ mv -f "$JAR.new" "$JAR"
 log "jar 已替换"
 
 # ---------- 4. 重启并健康检查 ----------
-MODE="${MODE:-}"
-if [ -z "$MODE" ]; then
-  if [ -f "$APP_DIR/docker-compose.yml" ] || [ -f "$APP_DIR/compose.yaml" ]; then
-    MODE="docker"
-  else
-    MODE="systemd"
-  fi
-fi
-
 restart_app() {
   case "$MODE" in
     docker)  ( cd "$APP_DIR" && docker compose up -d --force-recreate kudu-console ) ;;
