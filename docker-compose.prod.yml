@@ -32,3 +32,15 @@ services:
       timeout: 5s
       start_period: 40s
       retries: 3
+
+  # 可选：公网访问。用法见 README「公网访问」，务必同时配 Cloudflare Access 白名单
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: kudu-console-tunnel
+    restart: unless-stopped
+    command: tunnel --no-autoupdate run
+    environment:
+      TUNNEL_TOKEN: ${TUNNEL_TOKEN:-}
+    depends_on:
+      - kudu-console
+    profiles: ["tunnel"]

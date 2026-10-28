@@ -24,68 +24,137 @@
 
 ## 快速开始
 
-### Docker（服务器部署推荐）
+### Docker 部署（推荐）
 
-宿主只需 Docker + Docker Compose，不用装 JDK / Maven / Node —— 镜像里三阶段构建已经做完了。
+服务器只需要 Docker 20.10+ 和 Compose v2，不用装 JDK / Maven / Node —— 镜像里已经打包好 JRE、前端页面和全部依赖。
+
+镜像由流水线在每次 push 后自动构建，服务器只负责拉取。
+
+#### 一、首次部署
+
+服务器上不了 GitHub 也没关系：只从有网的机器传两个小文件过去，不用 clone 源码。
+
+**1. 传文件**（在 Windows / 有网的机器上执行）
 
 ```bash
-cp .env.example .env          # 改 KUDU_MASTERS，需要时改 HOST_PORT
-docker compose up -d --build  # 首次约 3~8 分钟，主要在拉 Maven 依赖
-docker compose logs -f kudu-console
+scp docker-compose.prod.yml root@<服务器IP>:/opt/kudu-console/
+scp .env.example root@<服务器IP>:/opt/kudu-console/.env
 ```
 
-浏览器打开 `http://<机器IP>:8088/`，集群状态页能出 LEADER / FOLLOWER 就是通了。
+**2. 配置**（在服务器上）
 
 ```bash
-curl -s http://127.0.0.1:8088/api/cluster/status | head -c 200   # 命令行验证
+cd /opt/kudu-console
+mkdir -p data/config data/logs
+vi .env
 ```
 
-日常操作：
+`.env` 至少改这两项：
 
-```bash
-docker compose ps                     # 状态
-docker compose restart kudu-console   # 重启
-docker compose down                   # 停止并删除容器（挂载目录不受影响）
+```env
+KUDU_MASTERS=192.168.46.23:7051,192.168.46.23:7151,192.168.46.23:7251
+IMAGE=ghcr.io/999bug/kudu-console:v1.0.1
 ```
 
-**升级**：两种跑法对应两种升级方式。
-
-| 编排文件 | 镜像来源 | 适用场景 |
-| --- | --- | --- |
-| `docker-compose.yml` | 本地源码构建 | 开发机；内网拿不到镜像仓库 |
-| `docker-compose.prod.yml` | 拉取 `ghcr.io` 镜像 | 服务器；不需要源码、JDK、Maven、Node |
-
-源码模式下 `release/` 是 jar 的投放目录，把新版本放进去再重启即可；用脚本更省事（自动校验 + 失败回滚，见 [DEPLOY.md](DEPLOY.md)）：
+**3. 启动**
 
 ```bash
-./deploy/upgrade.sh
+docker compose -f docker-compose.prod.yml up -d
 ```
 
-`release/` 为空时容器会用镜像内置的 jar 启动，首次部署不需要手动准备 jar。
+首次拉镜像约 144MB，国内通常 1~3 分钟。
 
-镜像模式下更新代码只有两步：
+**4. 验证**
 
 ```bash
-# 1. 推代码，流水线自动构建、打 tag、发布
+docker compose -f docker-compose.prod.yml ps
+curl -s http://127.0.0.1:8088/api/cluster/status | head -c 300
+```
+
+浏览器打开 `http://<服务器IP>:8088/`，集群状态页出现 LEADER / FOLLOWER 就成功了。
+
+#### 二、更新代码
+
+**1. 推送**（本地）
+
+```bash
+git add <改动文件> && git commit -m "说明"
 git push origin main
+```
 
-# 2. 服务器上拉新镜像（也可以交给 cron 全自动，见 DEPLOY.md）
+流水线自动完成：跑测试 → 构建前端 → 打包 jar → 构建镜像 → 推 ghcr.io → 自动打 tag（`v1.0.2`、`v1.0.3`…）→ 发布 Release。**不用手动打 tag。**
+
+**2. 换版本**（服务器）
+
+```bash
+cd /opt/kudu-console
 docker compose -f docker-compose.prod.yml pull
 docker compose -f docker-compose.prod.yml up -d
 ```
 
-`data/config`、`data/logs` 是挂载卷，配置和日志不随容器重建丢失。生产环境建议在 `.env` 里固定 `IMAGE=ghcr.io/999bug/kudu-console:v1.0.2`，回滚就是改回旧版本号再 `up -d`。
+`up -d` 发现镜像变了会自动重建容器，`data/` 里的配置和日志不受影响。
 
-**公网访问**：不占公网 IP、不开端口，走 Cloudflare 隧道：
+想彻底不用管，挂个 cron 每 5 分钟检查一次：
 
-```bash
-# 先在 .env 填 TUNNEL_TOKEN，并到 Zero Trust 配好 Public Hostname 与 Access 策略
-docker compose --profile tunnel up -d
+```cron
+*/5 * * * * cd /opt/kudu-console && docker compose -f docker-compose.prod.yml pull -q && docker compose -f docker-compose.prod.yml up -d >> logs/auto-update.log 2>&1
 ```
 
-状态与日志落在 `./data/config`、`./data/logs`，容器重建不丢。
+> cron 全自动必须用 `IMAGE=...:latest`，固定版本号不会被动更新。
 
-**目标机器访问不了 GitHub / 外网**：不要在那边 clone 源码构建，直接从 Release 取现成产物（jar 或镜像离线包）。三种情况的对应做法见 [DEPLOY.md](DEPLOY.md) 的「目标机器上不了外网」一节。
+#### 三、回滚
+
+改 `.env` 里的版本号再 `up -d`：
+
+```env
+IMAGE=ghcr.io/999bug/kudu-console:v1.0.1
+```
+
+```bash
+docker compose -f docker-compose.prod.yml up -d
+```
+
+历史版本都在 [Releases](https://github.com/999bug/kudu-crud/releases)，tag 永久保留。
+
+#### 四、常用命令
+
+```bash
+docker compose -f docker-compose.prod.yml ps         # 状态
+docker compose -f docker-compose.prod.yml logs -f    # 实时日志
+docker compose -f docker-compose.prod.yml restart    # 重启
+docker compose -f docker-compose.prod.yml down       # 停止并删除容器（data/ 不受影响）
+```
+
+嫌 `-f` 太长就先 `export COMPOSE_FILE=docker-compose.prod.yml`，之后直接 `docker compose ps`。
+
+#### 五、公网访问
+
+不占公网 IP、不开端口，走 Cloudflare 隧道：
+
+1. `.env` 填 `TUNNEL_TOKEN=...`
+2. Zero Trust 里配 Public Hostname，指向 `http://kudu-console:8088`
+3. 启动带隧道的编排：
+
+```bash
+docker compose -f docker-compose.prod.yml --profile tunnel up -d
+```
+
+**务必同时配 Access 策略**（邮箱白名单）。这个控制台没有登录鉴权，能删表删库，裸挂公网等于把数据库交出去。
+
+#### 六、完全断网 / 拿不到镜像
+
+用 Release 里的离线包，`docker load` 导入即可，步骤见 [DEPLOY.md](DEPLOY.md) 的「目标机器上不了外网」。
+
+#### 七、从源码构建（开发用）
+
+上面都是拉现成镜像。要在本机构建镜像，用另一套编排：
+
+```bash
+cp .env.example .env
+docker compose up -d --build     # 首次 3~8 分钟，主要在拉 Maven 依赖
+```
+
+升级把新 jar 放进 `release/` 再重启，或运行 `./deploy/upgrade.sh`（自动校验 + 失败回滚）。`release/` 为空时容器用镜像内置的 jar 启动。
 
 ### Windows
 
@@ -255,32 +324,18 @@ KUDU_CLUSTER=c17eeff58 python tools/api-smoke.py     # 指定平台
 KUDU_CONSOLE_URL=http://localhost:9090 python tools/api-smoke.py
 ```
 
-## 发布与部署
+## 发布产物
 
-这个项目不是静态站点，**GitHub Pages 部署不了**（跑不了 JVM，也连不到内网 Kudu）。GitHub 负责源码托管 + 自动出包，进程必须跑在能访问 Kudu master 的机器上。
+`git push origin main` 即发版，流水线产出三样东西：
 
-**push 即发版**，不用手动打 tag：
+| 产物 | 用途 |
+| --- | --- |
+| `kudu-console.jar` + `.sha256` | 直接 `java -jar`，或给 `deploy/upgrade.sh` 在线升级 |
+| `ghcr.io/999bug/kudu-console:<tag>` 与 `:latest` | Docker 部署与更新 |
+| `kudu-console-image-<tag>.tar.gz` | 完全离线时 `docker load` |
 
-```bash
-git push origin main
-```
+版本号自动递增 `v1.0.<run_number>`。要指定版本就 `git tag v1.0.5 && git push origin v1.0.5`，或 Actions 手动触发。Release 只保留最近 20 个，tag 全部保留。
 
-流水线会自动跑测试 → 构建前端 → 打包 jar → 构建容器镜像 → 自动打版本 tag（`v1.0.<run_number>`）→ 发布 Release（jar + sha256 + 离线镜像包）。
+为什么不能部署到 GitHub Pages：这是 JVM 进程 + Kudu 客户端，静态托管跑不了 Java，也连不到内网集群。
 
-服务器上更新：
-
-```bash
-cd /opt/kudu-console
-docker compose -f docker-compose.prod.yml pull
-docker compose -f docker-compose.prod.yml up -d
-```
-
-想彻底不用管，挂个 cron 每 5 分钟检查一次新镜像：
-
-```cron
-*/5 * * * * cd /opt/kudu-console && docker compose -f docker-compose.prod.yml pull -q && docker compose -f docker-compose.prod.yml up -d >> logs/auto-update.log 2>&1
-```
-
-要指定版本号就手动打 tag：`git tag v1.0.5 && git push origin v1.0.5`，或用 Actions 手动触发。
-
-完整的三种上线方式、公网暴露与鉴权（Cloudflare Tunnel / Caddy）、回滚与巡检配置见 **[DEPLOY.md](DEPLOY.md)**。
+内网直连、Cloudflare Tunnel、公网反代 + Basic Auth、离线部署与故障排查见 **[DEPLOY.md](DEPLOY.md)**。
