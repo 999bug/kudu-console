@@ -4,6 +4,7 @@ import com.kuducrud.config.ClusterRegistry;
 import com.kuducrud.config.ClusterRuntime;
 import com.kuducrud.kudu.KuduConnectionManager;
 import com.kuducrud.kudu.TableNameUtil;
+import com.kuducrud.model.BatchCompareResult;
 import com.kuducrud.model.CompareTaskView;
 import com.kuducrud.model.TableCompareRequest;
 import com.kuducrud.model.TableCompareResult;
@@ -37,6 +38,8 @@ import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * 表比对：表存在性 → schema → 全量行内容对账，支持同平台或跨平台两张表。
+ * <p>三种模式：{@code table} 单表比对；{@code database} 按库比对（两库内按表短名逐一配对）；
+ * {@code prefix} 按前缀比对（目标库 = 前缀 + 源库，如 t_1028_ → rec_t_1028_）。
  * <p>口径参考 KuduTableCompareIT：源表整表扫进内存（主键 → 整行编码），再扫目标表逐行对账，
  * 报目标缺失 / 目标多出 / 内容不一致三类差异；schema 按列名排序比对，忽略列顺序、encoding、compression。
  * <p>只读比对，不占用表锁；执行期间应避免写入，否则结果可能自相矛盾。异步执行，前端轮询进度。
@@ -110,114 +113,23 @@ public class TableCompareService {
             }
             ClusterRuntime leftRuntime = clusters.runtime(spec.leftCluster());
             ClusterRuntime rightRuntime = clusters.runtime(spec.rightCluster());
-            KuduConnectionManager leftConnection = leftRuntime.connection();
-            KuduConnectionManager rightConnection = rightRuntime.connection();
-            String leftClusterName = leftRuntime.config().name();
-            String rightClusterName = rightRuntime.config().name();
-
-            boolean leftExists = leftConnection.tableExists(spec.leftTable());
-            boolean rightExists = rightConnection.tableExists(spec.rightTable());
-            if (!leftExists || !rightExists) {
-                String message = !leftExists && !rightExists
-                        ? "源表和目标表都不存在"
-                        : !leftExists ? "源表不存在：" + spec.leftTable() : "目标表不存在：" + spec.rightTable();
-                task.result = result(false, message,
-                        new TableSide(spec.leftCluster(), leftClusterName, spec.leftTable(), leftExists, 0, null),
-                        new TableSide(spec.rightCluster(), rightClusterName, spec.rightTable(), rightExists, 0, null),
-                        false, List.of(), List.of(), List.of(), false, List.of(), List.of(), null, task.startedAtMs);
-                task.state = "SUCCEEDED";
-                task.message = message;
-                task.finishedAtMs = System.currentTimeMillis();
+            PairContext ctx = new PairContext(leftRuntime.connection(), rightRuntime.connection(),
+                    spec.leftCluster(), spec.rightCluster(),
+                    leftRuntime.config().name(), rightRuntime.config().name());
+            if (isBatch(spec.mode())) {
+                runBatch(task, ctx);
                 return;
             }
-
-            KuduTable leftTable = leftConnection.table(spec.leftTable());
-            KuduTable rightTable = rightConnection.table(spec.rightTable());
-            Schema leftSchema = leftTable.getSchema();
-            Schema rightSchema = rightTable.getSchema();
-            Map<String, String> leftSignature = TableCompareSupport.signatureMap(leftSchema);
-            Map<String, String> rightSignature = TableCompareSupport.signatureMap(rightSchema);
-            boolean columnsEqual = leftSignature.equals(rightSignature);
-            List<ColumnDiff> columnDiffs = diffColumns(leftSignature, rightSignature);
-            List<String> leftPrimaryKey = TableCompareSupport.primaryKeyNames(leftSchema);
-            List<String> rightPrimaryKey = TableCompareSupport.primaryKeyNames(rightSchema);
-            boolean primaryKeyEqual = leftPrimaryKey.equals(rightPrimaryKey);
-
-            TableSide leftSide = new TableSide(spec.leftCluster(), leftClusterName, spec.leftTable(),
-                    true, leftSchema.getColumnCount(), null);
-            TableSide rightSide = new TableSide(spec.rightCluster(), rightClusterName, spec.rightTable(),
-                    true, rightSchema.getColumnCount(), null);
-
-            if (!columnsEqual) {
-                String message = "表结构不一致（" + columnDiffs.size() + " 处差异），已跳过数据比对";
-                task.result = result(false, message, leftSide, rightSide, false,
-                        TableCompareSupport.schemaSignature(leftSchema),
-                        TableCompareSupport.schemaSignature(rightSchema),
-                        columnDiffs, primaryKeyEqual, leftPrimaryKey, rightPrimaryKey, null, task.startedAtMs);
-                task.state = "SUCCEEDED";
-                task.message = message;
-                task.finishedAtMs = System.currentTimeMillis();
-                return;
-            }
-
-            if (!spec.compareData()) {
-                String message = primaryKeyEqual
-                        ? "表结构一致（未比对数据）" : "表结构一致，但主键顺序不一致";
-                task.result = result(primaryKeyEqual, message, leftSide, rightSide, true,
-                        TableCompareSupport.schemaSignature(leftSchema),
-                        TableCompareSupport.schemaSignature(rightSchema),
-                        columnDiffs, primaryKeyEqual, leftPrimaryKey, rightPrimaryKey, null, task.startedAtMs);
-                task.state = "SUCCEEDED";
-                task.message = message;
-                task.finishedAtMs = System.currentTimeMillis();
-                return;
-            }
-
-            Map<String, String> leftRows = new HashMap<>();
-            long leftCount = scanLeft(task, leftConnection, leftTable, leftSchema, leftRows);
-            if (task.canceled.get()) {
+            TableCompareResult result = comparePair(task, ctx, spec.leftTable(), spec.rightTable(), task.startedAtMs);
+            if (result == null) {
                 finishCanceled(task);
                 return;
             }
-
-            DataAccumulator data = scanRight(task, rightConnection, rightTable, rightSchema, leftRows);
-            if (task.canceled.get()) {
-                finishCanceled(task);
-                return;
-            }
-
-            long missing = leftRows.size();
-            data.collectMissingSamples(leftRows);
-            boolean dataEqual = missing == 0 && data.extra == 0 && data.mismatch == 0;
-            boolean consistent = primaryKeyEqual && dataEqual;
-            String dataMessage = "目标缺失 " + missing + " 行，多出 " + data.extra
-                    + " 行，内容不一致 " + data.mismatch + " 行";
-            String message;
-            if (!primaryKeyEqual && !dataEqual) {
-                message = "主键顺序不一致；数据不一致：" + dataMessage;
-            } else if (!primaryKeyEqual) {
-                message = "主键顺序不一致";
-            } else if (!dataEqual) {
-                message = "数据不一致：" + dataMessage;
-            } else {
-                message = leftCount + " 行数据一致";
-            }
-
-            task.result = result(consistent, message,
-                    new TableSide(spec.leftCluster(), leftClusterName, spec.leftTable(), true,
-                            leftSchema.getColumnCount(), leftCount),
-                    new TableSide(spec.rightCluster(), rightClusterName, spec.rightTable(), true,
-                            rightSchema.getColumnCount(), data.rightCount),
-                    true, TableCompareSupport.schemaSignature(leftSchema),
-                    TableCompareSupport.schemaSignature(rightSchema),
-                    columnDiffs, primaryKeyEqual, leftPrimaryKey, rightPrimaryKey,
-                    new DataDiff(data.matched, missing, data.extra, data.mismatch,
-                            data.missingSamples, data.extraSamples, data.mismatchSamples),
-                    task.startedAtMs);
+            task.result = result;
+            task.message = result.message();
             task.state = "SUCCEEDED";
-            task.message = message;
             task.finishedAtMs = System.currentTimeMillis();
-            log.info("table compare done: {} -> {}, consistent={}", spec.leftTable(), spec.rightTable(), consistent);
+            log.info("table compare done: {} -> {}, consistent={}", spec.leftTable(), spec.rightTable(), result.consistent());
         } catch (Exception e) {
             if (task.canceled.get()) {
                 finishCanceled(task);
@@ -226,9 +138,216 @@ public class TableCompareService {
             task.state = "FAILED";
             task.message = messageOf(e);
             task.finishedAtMs = System.currentTimeMillis();
-            log.warn("table compare failed: {} -> {}, reason={}",
-                    spec.leftTable(), spec.rightTable(), task.message);
+            log.warn("table compare failed: {} -> {}, reason={}", specLabel(spec), task.message);
         }
+    }
+
+    /**
+     * 比对一对表，返回结果；执行中被取消时返回 {@code null}。
+     * 异常向上抛给调用方处理（单表模式置任务失败，批量模式标记该表 FAILED）。
+     */
+    private TableCompareResult comparePair(Task task, PairContext ctx, String leftTableName, String rightTableName,
+                                           long pairStartMs) throws Exception {
+        boolean leftExists = ctx.left().tableExists(leftTableName);
+        boolean rightExists = ctx.right().tableExists(rightTableName);
+        if (!leftExists || !rightExists) {
+            String message = !leftExists && !rightExists
+                    ? "源表和目标表都不存在"
+                    : !leftExists ? "源表不存在：" + leftTableName : "目标表不存在：" + rightTableName;
+            return result(false, message,
+                    new TableSide(ctx.leftClusterId(), ctx.leftClusterName(), leftTableName, leftExists, 0, null),
+                    new TableSide(ctx.rightClusterId(), ctx.rightClusterName(), rightTableName, rightExists, 0, null),
+                    false, List.of(), List.of(), List.of(), false, List.of(), List.of(), null, pairStartMs);
+        }
+
+        KuduTable leftTable = ctx.left().table(leftTableName);
+        KuduTable rightTable = ctx.right().table(rightTableName);
+        Schema leftSchema = leftTable.getSchema();
+        Schema rightSchema = rightTable.getSchema();
+        Map<String, String> leftSignature = TableCompareSupport.signatureMap(leftSchema);
+        Map<String, String> rightSignature = TableCompareSupport.signatureMap(rightSchema);
+        boolean columnsEqual = leftSignature.equals(rightSignature);
+        List<ColumnDiff> columnDiffs = diffColumns(leftSignature, rightSignature);
+        List<String> leftPrimaryKey = TableCompareSupport.primaryKeyNames(leftSchema);
+        List<String> rightPrimaryKey = TableCompareSupport.primaryKeyNames(rightSchema);
+        boolean primaryKeyEqual = leftPrimaryKey.equals(rightPrimaryKey);
+
+        TableSide leftSide = new TableSide(ctx.leftClusterId(), ctx.leftClusterName(), leftTableName,
+                true, leftSchema.getColumnCount(), null);
+        TableSide rightSide = new TableSide(ctx.rightClusterId(), ctx.rightClusterName(), rightTableName,
+                true, rightSchema.getColumnCount(), null);
+
+        if (!columnsEqual) {
+            String message = "表结构不一致（" + columnDiffs.size() + " 处差异），已跳过数据比对";
+            return result(false, message, leftSide, rightSide, false,
+                    TableCompareSupport.schemaSignature(leftSchema),
+                    TableCompareSupport.schemaSignature(rightSchema),
+                    columnDiffs, primaryKeyEqual, leftPrimaryKey, rightPrimaryKey, null, pairStartMs);
+        }
+
+        if (!task.spec.compareData()) {
+            String message = primaryKeyEqual
+                    ? "表结构一致（未比对数据）" : "表结构一致，但主键顺序不一致";
+            return result(primaryKeyEqual, message, leftSide, rightSide, true,
+                    TableCompareSupport.schemaSignature(leftSchema),
+                    TableCompareSupport.schemaSignature(rightSchema),
+                    columnDiffs, primaryKeyEqual, leftPrimaryKey, rightPrimaryKey, null, pairStartMs);
+        }
+
+        Map<String, String> leftRows = new HashMap<>();
+        long leftCount = scanLeft(task, ctx.left(), leftTable, leftSchema, leftRows);
+        if (task.canceled.get()) {
+            return null;
+        }
+
+        DataAccumulator data = scanRight(task, ctx.right(), rightTable, rightSchema, leftRows);
+        if (task.canceled.get()) {
+            return null;
+        }
+
+        long missing = leftRows.size();
+        data.collectMissingSamples(leftRows);
+        boolean dataEqual = missing == 0 && data.extra == 0 && data.mismatch == 0;
+        boolean consistent = primaryKeyEqual && dataEqual;
+        String dataMessage = "目标缺失 " + missing + " 行，多出 " + data.extra
+                + " 行，内容不一致 " + data.mismatch + " 行";
+        String message;
+        if (!primaryKeyEqual && !dataEqual) {
+            message = "主键顺序不一致；数据不一致：" + dataMessage;
+        } else if (!primaryKeyEqual) {
+            message = "主键顺序不一致";
+        } else if (!dataEqual) {
+            message = "数据不一致：" + dataMessage;
+        } else {
+            message = leftCount + " 行数据一致";
+        }
+
+        return result(consistent, message,
+                new TableSide(ctx.leftClusterId(), ctx.leftClusterName(), leftTableName, true,
+                        leftSchema.getColumnCount(), leftCount),
+                new TableSide(ctx.rightClusterId(), ctx.rightClusterName(), rightTableName, true,
+                        rightSchema.getColumnCount(), data.rightCount),
+                true, TableCompareSupport.schemaSignature(leftSchema),
+                TableCompareSupport.schemaSignature(rightSchema),
+                columnDiffs, primaryKeyEqual, leftPrimaryKey, rightPrimaryKey,
+                new DataDiff(data.matched, missing, data.extra, data.mismatch,
+                        data.missingSamples, data.extraSamples, data.mismatchSamples),
+                pairStartMs);
+    }
+
+    /** 按库 / 按前缀批量比对：两库的表按短名配对（并集），逐对复用单表比对口径。 */
+    private void runBatch(Task task, PairContext ctx) {
+        Validated spec = task.spec;
+        long batchStart = task.startedAtMs;
+        try {
+            List<String> leftTables = BatchComparePlanner.tablesOfDb(ctx.left().listTables(), spec.leftDb());
+            List<String> rightTables = BatchComparePlanner.tablesOfDb(ctx.right().listTables(), spec.rightDb());
+            List<BatchComparePlanner.Pair> pairs = BatchComparePlanner.plan(leftTables, rightTables);
+            List<BatchCompareResult.Item> items = new ArrayList<>();
+            int consistent = 0;
+            int inconsistent = 0;
+            int failed = 0;
+            for (int i = 0; i < pairs.size(); i++) {
+                if (task.canceled.get()) {
+                    finishCanceled(task);
+                    return;
+                }
+                BatchComparePlanner.Pair pair = pairs.get(i);
+                task.message = "正在比对 " + (i + 1) + "/" + pairs.size() + "：" + pair.shortName();
+                BatchCompareResult.Item item = compareOne(task, ctx, pair);
+                if (item == null) {
+                    finishCanceled(task);
+                    return;
+                }
+                items.add(item);
+                switch (item.state()) {
+                    case "CONSISTENT" -> consistent++;
+                    case "FAILED" -> failed++;
+                    default -> inconsistent++;
+                }
+            }
+            String message = pairs.isEmpty()
+                    ? "两个库中都没有可比对的表"
+                    : "共 " + pairs.size() + " 张表：一致 " + consistent + "，不一致 " + inconsistent
+                            + (failed > 0 ? "，失败 " + failed : "")
+                            + (spec.compareData() ? "" : "（仅比对结构）");
+            task.result = new BatchCompareResult(spec.mode(), spec.leftCluster(), ctx.leftClusterName(),
+                    spec.rightCluster(), ctx.rightClusterName(), spec.leftDb(), spec.rightDb(), spec.prefix(),
+                    inconsistent == 0 && failed == 0, message, pairs.size(), consistent, inconsistent, failed,
+                    items, System.currentTimeMillis() - batchStart);
+            task.state = "SUCCEEDED";
+            task.message = message;
+            task.finishedAtMs = System.currentTimeMillis();
+            log.info("batch compare done: {} -> {}, tables={}, consistent={}, failed={}",
+                    spec.leftDb(), spec.rightDb(), pairs.size(), consistent, failed);
+        } catch (Exception e) {
+            if (task.canceled.get()) {
+                finishCanceled(task);
+                return;
+            }
+            task.state = "FAILED";
+            task.message = messageOf(e);
+            task.finishedAtMs = System.currentTimeMillis();
+            log.warn("batch compare failed: {} -> {}, reason={}", specLabel(spec), task.message);
+        }
+    }
+
+    /** 批量比对中的单表项；返回 {@code null} 表示被取消。 */
+    private BatchCompareResult.Item compareOne(Task task, PairContext ctx, BatchComparePlanner.Pair pair) {
+        long start = System.currentTimeMillis();
+        if (pair.leftTable() == null) {
+            return new BatchCompareResult.Item(null, pair.rightTable(), "MISSING_IN_LEFT",
+                    "源库中不存在该表", null, null, null, null, null, null, 0);
+        }
+        if (pair.rightTable() == null) {
+            return new BatchCompareResult.Item(pair.leftTable(), null, "MISSING_IN_RIGHT",
+                    "目标库中不存在该表", null, null, null, null, null, null, 0);
+        }
+        try {
+            TableCompareResult r = comparePair(task, ctx, pair.leftTable(), pair.rightTable(), start);
+            if (r == null) {
+                return null;
+            }
+            boolean structureOk = r.schemaEqual() && r.primaryKeyEqual();
+            String state;
+            Long missing = null;
+            Long extra = null;
+            Long mismatch = null;
+            if (!structureOk) {
+                state = "SCHEMA_DIFF";
+            } else if (r.data() != null) {
+                missing = r.data().missing();
+                extra = r.data().extra();
+                mismatch = r.data().mismatch();
+                state = missing == 0 && extra == 0 && mismatch == 0 ? "CONSISTENT" : "DATA_DIFF";
+            } else {
+                state = "CONSISTENT";
+            }
+            return new BatchCompareResult.Item(pair.leftTable(), pair.rightTable(), state, r.message(),
+                    r.schemaEqual(), r.left().rows(), r.right().rows(), missing, extra, mismatch,
+                    System.currentTimeMillis() - start);
+        } catch (Exception e) {
+            if (task.canceled.get()) {
+                return null;
+            }
+            return new BatchCompareResult.Item(pair.leftTable(), pair.rightTable(), "FAILED", messageOf(e),
+                    null, null, null, null, null, null, System.currentTimeMillis() - start);
+        }
+    }
+
+    private static boolean isBatch(String mode) {
+        return "database".equals(mode) || "prefix".equals(mode);
+    }
+
+    private static String specLabel(Validated spec) {
+        return isBatch(spec.mode())
+                ? spec.leftDb() + " -> " + spec.rightDb()
+                : spec.leftTable() + " -> " + spec.rightTable();
+    }
+
+    private record PairContext(KuduConnectionManager left, KuduConnectionManager right,
+                               String leftClusterId, String rightClusterId,
+                               String leftClusterName, String rightClusterName) {
     }
 
     private static long scanLeft(Task task, KuduConnectionManager connection, KuduTable table,
@@ -372,13 +491,10 @@ public class TableCompareService {
         if (request == null) {
             throw ApiException.badRequest("请求体不能为空");
         }
-        String leftTable = requireTable(request.leftTable(), "源表");
-        String rightTable = requireTable(request.rightTable(), "目标表");
+        String mode = request.mode() == null || request.mode().isBlank()
+                ? "table" : request.mode().trim().toLowerCase();
         String leftCluster = resolveCluster(request.leftCluster());
         String rightCluster = resolveCluster(request.rightCluster());
-        if (leftCluster.equals(rightCluster) && leftTable.equals(rightTable)) {
-            throw ApiException.badRequest("源表和目标表相同，无需比对");
-        }
         int maxRows = request.maxRows() == null ? DEFAULT_MAX_ROWS : request.maxRows();
         if (maxRows < 1 || maxRows > MAX_ROWS_LIMIT) {
             throw ApiException.badRequest("最大扫描行数需在 1.." + MAX_ROWS_LIMIT);
@@ -388,7 +504,66 @@ public class TableCompareService {
             throw ApiException.badRequest("差异样本数需在 0.." + MAX_SAMPLE_LIMIT);
         }
         boolean compareData = request.compareData() == null || request.compareData();
-        return new Validated(leftCluster, leftTable, rightCluster, rightTable, compareData, maxRows, sampleLimit);
+        switch (mode) {
+            case "table" -> {
+                String leftTable = requireTable(request.leftTable(), "源表");
+                String rightTable = requireTable(request.rightTable(), "目标表");
+                if (leftCluster.equals(rightCluster) && leftTable.equals(rightTable)) {
+                    throw ApiException.badRequest("源表和目标表相同，无需比对");
+                }
+                return new Validated("table", leftCluster, rightCluster,
+                        leftTable, rightTable, null, null, null, compareData, maxRows, sampleLimit);
+            }
+            case "database" -> {
+                String leftDb = requireDb(request.leftDb(), "源库");
+                String rightDb = requireDb(request.rightDb(), "目标库");
+                requireDifferentDbs(leftCluster, rightCluster, leftDb, rightDb);
+                return new Validated("database", leftCluster, rightCluster,
+                        null, null, leftDb, rightDb, null, compareData, maxRows, sampleLimit);
+            }
+            case "prefix" -> {
+                String leftDb = requireDb(request.leftDb(), "源库");
+                String prefix = requirePrefix(request.prefix());
+                String rightDb = prefix + leftDb;
+                requireDifferentDbs(leftCluster, rightCluster, leftDb, rightDb);
+                return new Validated("prefix", leftCluster, rightCluster,
+                        null, null, leftDb, rightDb, prefix, compareData, maxRows, sampleLimit);
+            }
+            default -> throw ApiException.badRequest("不支持的比对模式：" + request.mode());
+        }
+    }
+
+    private static void requireDifferentDbs(String leftCluster, String rightCluster, String leftDb, String rightDb) {
+        if (leftCluster.equals(rightCluster) && leftDb.equalsIgnoreCase(rightDb)) {
+            throw ApiException.badRequest("源库和目标库相同，无需比对");
+        }
+    }
+
+    /** 库名是表名第一个点之前的部分，本身不能含点号；系统库不允许比对。 */
+    private static String requireDb(String raw, String label) {
+        if (raw == null || raw.isBlank()) {
+            throw ApiException.badRequest(label + "不能为空");
+        }
+        String db = raw.trim();
+        if (db.contains(".")) {
+            throw ApiException.badRequest(label + "不能包含点号：" + db);
+        }
+        if (TableNameUtil.isSystemTable(db + ".t")) {
+            throw ApiException.badRequest("不支持比对系统库：" + db);
+        }
+        return db;
+    }
+
+    /** 统一恢复前缀，如 rec_：拼在源库名前面得到目标库名。 */
+    private static String requirePrefix(String raw) {
+        if (raw == null || raw.isBlank()) {
+            throw ApiException.badRequest("前缀不能为空");
+        }
+        String prefix = raw.trim();
+        if (prefix.contains(".") || !prefix.matches("\\S+")) {
+            throw ApiException.badRequest("前缀不能包含空格或点号：" + prefix);
+        }
+        return prefix;
     }
 
     private String resolveCluster(String id) {
@@ -416,7 +591,9 @@ public class TableCompareService {
         return e.getMessage() == null ? e.toString() : e.getMessage();
     }
 
-    private record Validated(String leftCluster, String leftTable, String rightCluster, String rightTable,
+    private record Validated(String mode, String leftCluster, String rightCluster,
+                             String leftTable, String rightTable,
+                             String leftDb, String rightDb, String prefix,
                              boolean compareData, int maxRows, int sampleLimit) {
     }
 
@@ -430,7 +607,7 @@ public class TableCompareService {
         private final AtomicLong leftScanned = new AtomicLong();
         private final AtomicLong rightScanned = new AtomicLong();
         private final AtomicBoolean canceled = new AtomicBoolean(false);
-        private volatile TableCompareResult result;
+        private volatile Object result;
 
         private Task(String id, Validated spec) {
             this.id = id;

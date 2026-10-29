@@ -18,7 +18,7 @@
 | 删库 / 按前缀删表 | 库只是表名前缀：预览命中清单后异步逐张删除，系统表自动跳过，可取消 |
 | 清空数据 | Kudu 无 truncate，用「扫描主键 + 批量 Delete」异步任务实现，带进度与取消 |
 | 测试调度 | 多选表后一键删除数据 / 加列 / 添加数据，可立即执行或按固定间隔重复；用于验证备份是否捕获变更 |
-| 表比对 | 选两张表（可跨平台）比对列结构、主键与全量行内容；报目标缺失 / 多出 / 内容不一致及样本 |
+| 表比对 | 单表 / 按库 / 按前缀三种模式（可跨平台）比对列结构、主键与全量行内容；报目标缺失 / 多出 / 内容不一致及样本 |
 | 任务中心 | 查看各类异步任务进度并取消，任务带平台归属 |
 
 查询条件支持 `EQ / NE / LT / LTE / GT / GTE / IN / IS_NULL / IS_NOT_NULL / PREFIX`，仅 AND 组合。
@@ -212,7 +212,7 @@ kudu-console/
 | PUT/DELETE | `/api/test/schedules/{id}` | 编辑 / 删除定时任务 |
 | POST | `/api/test/schedules/{id}/run`、`/toggle` | 立即执行一次 / 启用暂停 |
 | GET | `/api/test/schedules/{id}/runs` | 最近执行记录 |
-| POST | `/api/compare` | 启动表比对（body 含 `leftTable` / `rightTable`，可选左右 `cluster`） |
+| POST | `/api/compare` | 启动比对（`mode=table` 时 body 含 `leftTable` / `rightTable`；`mode=database` 含 `leftDb` / `rightDb`；`mode=prefix` 含 `leftDb` / `prefix`；均可选左右 `cluster`，`mode` 缺省为 `table`） |
 | GET | `/api/compare/{id}` | 比对进度与结果 |
 | POST | `/api/compare/{id}/cancel` | 取消比对 |
 | GET | `/api/compare/tables?cluster=` | 指定平台的表清单（供左右两侧选择） |
@@ -237,6 +237,7 @@ kudu-console/
 - **测试调度是「造变更」不是备份**：删除随机主键行、按 schema 生成新行（整型主键取扫描最大值+1，字符串主键带运行种子，复合主键逐列递增），修改表结构只支持加可空列（Kudu 不能改列类型）。`REPLACE` 模式会先删上一轮自动加的 `bk_test_` 列再加新列，避免列无限增长；手动重复执行也记住上一轮的列。
 - **测试任务按固定间隔轮询**：间隔 1 分钟~24 小时，可设最多执行次数与结束时间；同一任务上一轮未结束、或与 truncate / 删表 / 删库冲突时跳过本轮并记录。配置存 `config/test-schedules.json`，重启保留，服务停机错过的时间点只补跑一次。
 - **表比对是只读的**：源表整表扫进内存（主键 → 整行编码），再扫目标表逐行对账，报目标缺失 / 多出 / 内容不一致与前 N 条样本。schema 按列名排序比对，列顺序、encoding、compression、副本数、分区不参与；DECIMAL/VARCHAR 属性和主键顺序参与。默认最多 20 万行，超过任务失败；比对期间写入会让结果不可信。
+- **按库 / 按前缀比对是批量单表比对**：`mode=database` 选左右两个库，`mode=prefix` 只选源库并填统一恢复前缀（目标库 = 前缀 + 源库，如 `t_1028_` + `rec_` → `rec_t_1028_`）；两库的表按表短名（最后一节）配对，配对范围是两侧短名的并集，只在一侧存在的表报告「源缺表 / 目标缺表」。每张表复用单表比对口径，行数上限与样本数按单表计；结果只汇总每张表的结论与差异数，不含行级样本，需要样本时对单表再发起比对（前端结果表有「详情」按钮直接带出）。
 - **分页是「扫描 + 跳过 offset」**：Kudu 没有 OFFSET，且 hash 分区下扫描不保证主键全局有序，因此不做主键游标翻页。`limit ≤ 500`、`offset ≤ 10000`、单次扫描 ≤ 50000 行，超限直接拒绝，避免拖垮 tserver。行数只给估算值，不跑 `COUNT(*)`。
 - **只支持 AND**：Kudu 谓词无 OR。`NE` 与 `PREFIX` 的后缀校验在客户端完成（响应里 `clientFiltered=true`）；`NE` 按 SQL 语义排除 NULL。
 - **写入无事务**：`MANUAL_FLUSH` 分批提交，失败行逐条返回，已提交的行不会回滚。
@@ -249,7 +250,7 @@ kudu-console/
 ## 测试
 
 ```bash
-mvn test          # 单元测试：类型转换、表名解析、前缀匹配、任务冲突、测试数据生成、表比对签名、版本信息、DDL 校验
+mvn test          # 单元测试：类型转换、表名解析、前缀匹配、任务冲突、测试数据生成、表比对签名、批量比对配对、版本信息、DDL 校验
 ```
 
 接口冒烟（会对集群建临时表再删掉，需要控制台已启动）：

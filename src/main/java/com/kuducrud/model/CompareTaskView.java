@@ -5,6 +5,7 @@ import com.fasterxml.jackson.annotation.JsonInclude;
 /**
  * 比对任务视图：PENDING / RUNNING / SUCCEEDED / FAILED / CANCELED。
  * <p>比对是只读的，不占表锁；执行期间应避免写入，否则结果可能自相矛盾。
+ * <p>{@code result} 为 {@link TableCompareResult}（单表模式）或 {@link BatchCompareResult}（按库 / 按前缀模式）。
  */
 @JsonInclude(JsonInclude.Include.NON_NULL)
 public record CompareTaskView(
@@ -15,6 +16,6 @@ public record CompareTaskView(
         long rightScanned,
         long startedAtMs,
         Long finishedAtMs,
-        TableCompareResult result
+        Object result
 ) {
 }

@@ -5,10 +5,14 @@ import { store, loadClusters, toast, toastError } from '../store'
 import { formatCount } from '../format'
 
 const clusters = computed(() => store.clusters)
+const mode = ref('table') // table: 单表比对 / database: 按库比对 / prefix: 按前缀比对
 const leftCluster = ref('')
 const rightCluster = ref('')
 const leftTable = ref('')
 const rightTable = ref('')
+const leftDb = ref('')
+const rightDb = ref('')
+const prefix = ref('rec_')
 const leftDbs = ref([])
 const rightDbs = ref([])
 const leftLoading = ref(false)
@@ -22,8 +26,15 @@ let timer = null
 
 const running = computed(() => !!task.value && ['PENDING', 'RUNNING'].includes(task.value.state))
 const result = computed(() => task.value?.result || null)
-const canStart = computed(() => !!leftCluster.value && !!rightCluster.value
-  && !!leftTable.value && !!rightTable.value && !running.value && !starting.value)
+const batchResult = computed(() => result.value && Array.isArray(result.value.items) ? result.value : null)
+const canStart = computed(() => {
+  if (!leftCluster.value || !rightCluster.value || running.value || starting.value) return false
+  if (mode.value === 'table') return !!leftTable.value && !!rightTable.value
+  if (mode.value === 'database') return !!leftDb.value && !!rightDb.value
+  if (mode.value === 'prefix') return !!leftDb.value && !!prefix.value.trim()
+  return false
+})
+const derivedRightDb = computed(() => prefix.value.trim() + leftDb.value)
 const leftTableCount = computed(() => leftDbs.value.reduce((sum, group) => sum + group.tables.length, 0))
 const rightTableCount = computed(() => rightDbs.value.reduce((sum, group) => sum + group.tables.length, 0))
 
@@ -39,8 +50,8 @@ const sampleGroups = computed(() => {
 
 function sideState(side) {
   return side === 'left'
-    ? { cluster: leftCluster, table: leftTable, dbs: leftDbs, loading: leftLoading }
-    : { cluster: rightCluster, table: rightTable, dbs: rightDbs, loading: rightLoading }
+    ? { cluster: leftCluster, table: leftTable, db: leftDb, dbs: leftDbs, loading: leftLoading }
+    : { cluster: rightCluster, table: rightTable, db: rightDb, dbs: rightDbs, loading: rightLoading }
 }
 
 async function loadSide(side) {
@@ -60,6 +71,10 @@ async function loadSide(side) {
     if (state.table.value && !names.has(state.table.value)) {
       state.table.value = ''
     }
+    const dbs = new Set(state.dbs.value.map((group) => group.db))
+    if (state.db.value && !dbs.has(state.db.value)) {
+      state.db.value = ''
+    }
   } catch (e) {
     if (seq !== loadSeq[side]) return
     state.dbs.value = []
@@ -72,7 +87,20 @@ async function loadSide(side) {
 function onClusterChange(side) {
   const state = sideState(side)
   state.table.value = ''
+  state.db.value = ''
   loadSide(side)
+}
+
+function setMode(value) {
+  if (mode.value === value) return
+  mode.value = value
+  onModeChange()
+}
+
+function onModeChange() {
+  stopPolling()
+  task.value = null
+  error.value = ''
 }
 
 function stateText(state) {
@@ -96,6 +124,45 @@ function rowsText(side) {
   return side.rows == null ? '未扫描' : formatCount(side.rows) + ' 行'
 }
 
+function shortNameOf(table) {
+  if (!table) return '—'
+  const normalized = table.replace(/^impala::/i, '')
+  const idx = normalized.lastIndexOf('.')
+  return idx >= 0 && idx < normalized.length - 1 ? normalized.substring(idx + 1) : normalized
+}
+
+function itemStateText(state) {
+  return {
+    CONSISTENT: '一致',
+    SCHEMA_DIFF: '结构不一致',
+    DATA_DIFF: '数据不一致',
+    MISSING_IN_RIGHT: '目标缺表',
+    MISSING_IN_LEFT: '源缺表',
+    FAILED: '失败'
+  }[state] || state
+}
+
+function itemStateClass(state) {
+  if (state === 'CONSISTENT') return 'ok'
+  return 'bad'
+}
+
+function countText(value) {
+  return value == null ? '—' : formatCount(value)
+}
+
+function canFocusItem(item) {
+  return !!item.leftTable && !!item.rightTable
+}
+
+function focusItem(item) {
+  if (!canFocusItem(item) || running.value) return
+  mode.value = 'table'
+  leftTable.value = item.leftTable
+  rightTable.value = item.rightTable
+  startCompare()
+}
+
 async function startCompare() {
   if (!canStart.value) return
   const maxRows = Number(options.maxRows)
@@ -113,15 +180,26 @@ async function startCompare() {
   stopPolling()
   task.value = null
   try {
-    task.value = await api.startCompare({
+    const body = {
+      mode: mode.value,
       leftCluster: leftCluster.value,
-      leftTable: leftTable.value,
       rightCluster: rightCluster.value,
-      rightTable: rightTable.value,
       compareData: options.compareData,
       maxRows,
       sampleLimit
-    })
+    }
+    if (mode.value === 'table') {
+      body.leftTable = leftTable.value
+      body.rightTable = rightTable.value
+    } else {
+      body.leftDb = leftDb.value
+      if (mode.value === 'database') {
+        body.rightDb = rightDb.value
+      } else {
+        body.prefix = prefix.value.trim()
+      }
+    }
+    task.value = await api.startCompare(body)
     timer = setInterval(poll, 700)
   } catch (e) {
     error.value = e.message
@@ -188,10 +266,15 @@ onUnmounted(stopPolling)
         <div class="card-sub">比对恢复前后的表结构与全量数据，支持跨平台</div>
       </div>
       <div class="card-body">
+        <div class="mode-tabs">
+          <button type="button" class="mode-tab" :class="{ active: mode === 'table' }" :disabled="running" @click="setMode('table')">单表比对</button>
+          <button type="button" class="mode-tab" :class="{ active: mode === 'database' }" :disabled="running" @click="setMode('database')">按库比对</button>
+          <button type="button" class="mode-tab" :class="{ active: mode === 'prefix' }" :disabled="running" @click="setMode('prefix')">按前缀比对</button>
+        </div>
         <div class="compare-grid">
           <div class="compare-side">
             <div class="side-head">
-              <span class="tag plain">源表</span>
+              <span class="tag plain">{{ mode === 'table' ? '源表' : '源库' }}</span>
               <span class="hint">{{ leftLoading ? '加载中…' : leftTableCount + ' 张可选' }}</span>
             </div>
             <div class="field">
@@ -201,7 +284,7 @@ onUnmounted(stopPolling)
                 <option v-for="cluster in clusters" :key="cluster.id" :value="cluster.id">{{ cluster.name }}</option>
               </select>
             </div>
-            <div class="field">
+            <div v-if="mode === 'table'" class="field">
               <label class="label">表</label>
               <select v-model="leftTable" class="select mono" :disabled="running || leftLoading">
                 <option value="">选择表…</option>
@@ -212,11 +295,20 @@ onUnmounted(stopPolling)
                 </optgroup>
               </select>
             </div>
+            <div v-else class="field">
+              <label class="label">库</label>
+              <select v-model="leftDb" class="select mono" :disabled="running || leftLoading">
+                <option value="">选择库…</option>
+                <option v-for="group in leftDbs" :key="group.db" :value="group.db">
+                  {{ group.db }}（{{ group.tableCount }} 张表）
+                </option>
+              </select>
+            </div>
           </div>
 
           <div class="compare-side">
             <div class="side-head">
-              <span class="tag plain">目标表</span>
+              <span class="tag plain">{{ mode === 'table' ? '目标表' : '目标库' }}</span>
               <span class="hint">{{ rightLoading ? '加载中…' : rightTableCount + ' 张可选' }}</span>
             </div>
             <div class="field">
@@ -226,7 +318,7 @@ onUnmounted(stopPolling)
                 <option v-for="cluster in clusters" :key="cluster.id" :value="cluster.id">{{ cluster.name }}</option>
               </select>
             </div>
-            <div class="field">
+            <div v-if="mode === 'table'" class="field">
               <label class="label">表</label>
               <select v-model="rightTable" class="select mono" :disabled="running || rightLoading">
                 <option value="">选择表…</option>
@@ -237,6 +329,24 @@ onUnmounted(stopPolling)
                 </optgroup>
               </select>
             </div>
+            <div v-else-if="mode === 'database'" class="field">
+              <label class="label">库</label>
+              <select v-model="rightDb" class="select mono" :disabled="running || rightLoading">
+                <option value="">选择库…</option>
+                <option v-for="group in rightDbs" :key="group.db" :value="group.db">
+                  {{ group.db }}（{{ group.tableCount }} 张表）
+                </option>
+              </select>
+            </div>
+            <template v-else>
+              <div class="field">
+                <label class="label">恢复前缀</label>
+                <input v-model="prefix" class="input mono" :disabled="running" placeholder="rec_" />
+              </div>
+              <div class="hint mono">
+                目标库 = 前缀 + 源库：{{ leftDb || '源库' }} → <b>{{ derivedRightDb || '—' }}</b>
+              </div>
+            </template>
           </div>
         </div>
 
@@ -260,6 +370,7 @@ onUnmounted(stopPolling)
 
         <div class="hint" style="margin-top: 8px">
           整表内容载入内存对账，建议单表 ≤ 20 万行；列顺序、encoding、compression、副本数与分区不参与比对。
+          按库 / 按前缀比对时按表短名配对，行数上限与样本数按单张表计。
           比对期间请停止写入，否则结果可能自相矛盾。
         </div>
         <div v-if="error" class="banner error" style="margin-top: 10px">{{ error }}</div>
@@ -280,8 +391,89 @@ onUnmounted(stopPolling)
         </div>
       </div>
       <div class="card-body">
-        <div v-if="running" class="loading"><span class="spinner"></span>正在扫描并比对两张表…</div>
+        <div v-if="running" class="loading"><span class="spinner"></span>{{ task.message || '正在扫描并比对…' }}</div>
         <div v-else-if="!result" class="empty">{{ task.message || '没有比对结果' }}</div>
+
+        <template v-else-if="batchResult">
+          <div class="result-banner" :class="batchResult.allConsistent ? 'ok' : 'bad'">
+            {{ batchResult.message }}
+          </div>
+          <div class="hint mono" style="margin-top: 8px">
+            源 {{ batchResult.leftClusterName }} · {{ batchResult.leftDb }}
+            → 目标 {{ batchResult.rightClusterName }} · {{ batchResult.rightDb }}
+            <template v-if="batchResult.prefix">（前缀 {{ batchResult.prefix }}）</template>
+            · 耗时 {{ batchResult.elapsedMs }} ms
+          </div>
+
+          <div class="metric-grid batch-metrics">
+            <div class="metric">
+              <div class="metric-label">总表数</div>
+              <div class="metric-value">{{ batchResult.totalTables }}</div>
+            </div>
+            <div class="metric">
+              <div class="metric-label">一致</div>
+              <div class="metric-value" :class="{ good: batchResult.consistentTables > 0 }">
+                {{ batchResult.consistentTables }}
+              </div>
+            </div>
+            <div class="metric">
+              <div class="metric-label">不一致</div>
+              <div class="metric-value" :class="{ bad: batchResult.inconsistentTables > 0 }">
+                {{ batchResult.inconsistentTables }}
+              </div>
+            </div>
+            <div class="metric">
+              <div class="metric-label">失败</div>
+              <div class="metric-value" :class="{ bad: batchResult.failedTables > 0 }">
+                {{ batchResult.failedTables }}
+              </div>
+            </div>
+          </div>
+
+          <div class="grid-wrap" style="margin-top: 12px">
+            <table class="grid">
+              <thead>
+                <tr>
+                  <th>表</th>
+                  <th>源表</th>
+                  <th>目标表</th>
+                  <th>结果</th>
+                  <th>源行数</th>
+                  <th>目标行数</th>
+                  <th>缺失</th>
+                  <th>多出</th>
+                  <th>不一致</th>
+                  <th>说明</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="item in batchResult.items" :key="(item.leftTable || '') + '|' + (item.rightTable || '')">
+                  <td class="mono">{{ shortNameOf(item.leftTable || item.rightTable) }}</td>
+                  <td class="mono wrap">{{ item.leftTable || '—' }}</td>
+                  <td class="mono wrap">{{ item.rightTable || '—' }}</td>
+                  <td>
+                    <span class="status">
+                      <span class="status-dot" :class="itemStateClass(item.state)"></span>{{ itemStateText(item.state) }}
+                    </span>
+                  </td>
+                  <td class="mono">{{ countText(item.leftRows) }}</td>
+                  <td class="mono">{{ countText(item.rightRows) }}</td>
+                  <td class="mono" :class="{ bad: item.missing > 0 }">{{ countText(item.missing) }}</td>
+                  <td class="mono" :class="{ bad: item.extra > 0 }">{{ countText(item.extra) }}</td>
+                  <td class="mono" :class="{ bad: item.mismatch > 0 }">{{ countText(item.mismatch) }}</td>
+                  <td class="wrap">{{ item.message }}</td>
+                  <td>
+                    <button v-if="canFocusItem(item)" class="btn ghost" :disabled="running" @click="focusItem(item)">详情</button>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="hint" style="margin-top: 8px">
+            批量比对只汇总每张表的结论与差异数；点「详情」对单张表重新比对，可查看行级差异样本。
+          </div>
+        </template>
 
         <template v-else>
           <div class="result-banner" :class="result.consistent ? 'ok' : 'bad'">
@@ -405,6 +597,41 @@ onUnmounted(stopPolling)
 </template>
 
 <style scoped>
+.mode-tabs {
+  display: flex;
+  width: fit-content;
+  margin-bottom: 14px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+.mode-tab {
+  appearance: none;
+  border: none;
+  background: transparent;
+  color: var(--text-2);
+  padding: 6px 14px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.mode-tab + .mode-tab {
+  border-left: 1px solid var(--border-strong);
+}
+.mode-tab:hover:not(:disabled) {
+  color: var(--text);
+}
+.mode-tab.active {
+  background: var(--accent-weak);
+  color: var(--accent);
+  font-weight: 600;
+}
+.batch-metrics {
+  margin-top: 12px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+.metric-value.good {
+  color: var(--ok);
+}
 .compare-grid {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
@@ -523,5 +750,4 @@ onUnmounted(stopPolling)
   .metric-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
-}
-</style>
+}</style>
