@@ -50,6 +50,18 @@ public class JobController {
                 request == null ? null : request.acknowledge());
     }
 
+    public record DropPrefixRequest(String confirm, Boolean acknowledge) {
+    }
+
+    /** 按表名前缀批量删表（异步任务）：删除前用 GET /api/tables/prefix 预览命中的表。 */
+    @PostMapping("/drop-prefix")
+    public JobView dropPrefix(@RequestParam("prefix") String prefix,
+                              @RequestBody(required = false) DropPrefixRequest request) {
+        return registry.current().dropPrefix().submit(prefix,
+                request == null ? null : request.confirm(),
+                request == null ? null : request.acknowledge());
+    }
+
     @GetMapping
     public List<JobView> list() {
         return jobs.list();

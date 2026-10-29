@@ -1,6 +1,5 @@
 package com.kuducrud.job;
 
-import com.kuducrud.kudu.TableNameUtil;
 import com.kuducrud.model.JobView;
 import com.kuducrud.web.ApiException;
 import jakarta.annotation.PreDestroy;
@@ -29,6 +28,11 @@ public class JobRegistry {
     private static final Logger log = LoggerFactory.getLogger(JobRegistry.class);
     private static final int MAX_JOBS = 50;
 
+    /** 资源键前缀：单表任务、删库任务、按前缀删表任务。 */
+    static final String TABLE_KEY = "t:";
+    static final String DB_KEY = "d:";
+    static final String PREFIX_KEY = "p:";
+
     private final Map<String, JobHandle> jobs = new ConcurrentHashMap<>();
     private final Set<String> runningKeys = ConcurrentHashMap.newKeySet();
     private final Map<String, String> jobLocks = new ConcurrentHashMap<>();
@@ -45,7 +49,8 @@ public class JobRegistry {
 
     /**
      * 登记任务并占用资源锁。{@code resourceKey} 相同即互斥：
-     * 单表任务用 {@code clusterId|t:<table>}，删库任务用 {@code clusterId|d:<db>}。
+     * 单表任务用 {@code clusterId|t:<table>}，删库任务用 {@code clusterId|d:<db>}，
+     * 按前缀删表用 {@code clusterId|p:<prefix>}。
      */
     public JobHandle create(String type, String clusterId, String target, String resourceKey, String lockLabel) {
         if (!runningKeys.add(resourceKey)) {
@@ -86,21 +91,25 @@ public class JobRegistry {
         }
     }
 
-    /** 该库下是否有正在运行的单表任务（删库前检查，避免互相踩）。 */
-    public boolean anyRunningInDb(String clusterId, String db) {
-        String prefix = clusterId + "|t:";
+    /** 该平台下正在运行的破坏性任务资源键，已去掉 {@code clusterId|} 前缀（形如 t:/d:/p:）。 */
+    public List<String> runningResourceKeys(String clusterId) {
+        String prefix = clusterId + "|";
         return runningKeys.stream()
                 .filter(key -> key.startsWith(prefix))
                 .map(key -> key.substring(prefix.length()))
-                .anyMatch(table -> db.equalsIgnoreCase(TableNameUtil.dbOf(table)));
+                .toList();
     }
 
     public static String tableKey(String clusterId, String table) {
-        return clusterId + "|t:" + table;
+        return clusterId + "|" + TABLE_KEY + table;
     }
 
     public static String dbKey(String clusterId, String db) {
-        return clusterId + "|d:" + db;
+        return clusterId + "|" + DB_KEY + db;
+    }
+
+    public static String prefixKey(String clusterId, String prefix) {
+        return clusterId + "|" + PREFIX_KEY + prefix;
     }
 
     public JobHandle get(String id) {

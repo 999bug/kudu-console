@@ -49,15 +49,15 @@ public class DropDbService {
         if (tables.isEmpty()) {
             throw ApiException.notFound("库 " + name + " 下没有表");
         }
-        if (registry.anyRunningInDb(clusterId, name)) {
-            throw ApiException.conflict("JOB_CONFLICT",
-                    "库 " + name + " 下有表正在执行破坏性任务，请等待其结束");
+        String conflict = DropConflicts.forDb(registry, clusterId, name);
+        if (conflict != null) {
+            throw ApiException.conflict("JOB_CONFLICT", conflict);
         }
 
         JobHandle handle = registry.create("DROP_DB", clusterId, name,
                 JobRegistry.dbKey(clusterId, name), "库 " + name);
         handle.totalEstimate().set(tables.size());
-        registry.submit(handle, () -> run(handle, tables));
+        registry.submit(handle, () -> TableBatchDropper.run(connection, handle, tables, "删库"));
         log.info("drop-db job submitted: db={}, tables={}", name, tables.size());
         return handle.toView();
     }
@@ -71,52 +71,5 @@ public class DropDbService {
             }
         }
         return result;
-    }
-
-    private void run(JobHandle handle, List<String> tables) {
-        handle.markStarted();
-        int dropped = 0;
-        int failed = 0;
-        StringBuilder failureDetail = new StringBuilder();
-        try {
-            for (String table : tables) {
-                if (handle.cancelRequested()) {
-                    break;
-                }
-                try {
-                    connection.client().deleteTable(table);
-                    connection.invalidate(table);
-                    dropped++;
-                    handle.deleted().incrementAndGet();
-                } catch (Exception e) {
-                    failed++;
-                    handle.failed().incrementAndGet();
-                    if (failureDetail.length() < 400) {
-                        failureDetail.append(table).append(": ")
-                                .append(e.getMessage() == null ? e.toString() : e.getMessage()).append("; ");
-                    }
-                }
-                handle.processed().incrementAndGet();
-            }
-
-            String summary = "已删除 " + dropped + "/" + tables.size() + " 张表";
-            if (failed > 0) {
-                summary += "，失败 " + failed + " 张：" + failureDetail;
-            }
-            if (handle.cancelRequested()) {
-                handle.markFinished("CANCELED", "已取消，" + summary);
-            } else if (failed > 0) {
-                handle.markFinished("FAILED", summary);
-            } else {
-                handle.markFinished("SUCCEEDED", summary);
-            }
-            log.info("drop-db done: db={}, dropped={}, failed={}", handle.table(), dropped, failed);
-        } catch (Throwable e) {
-            String message = e.getMessage() == null ? e.toString() : e.getMessage();
-            handle.markFinished("FAILED", "删库中断：" + message);
-            log.warn("drop-db failed: db={}, dropped={}, reason={}", handle.table(), dropped, message);
-        } finally {
-            handle.processed().set(Math.min(tables.size(), handle.processed().get()));
-        }
     }
 }

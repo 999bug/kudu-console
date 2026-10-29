@@ -1,6 +1,7 @@
 package com.kuducrud.web;
 
 import com.kuducrud.config.ClusterRegistry;
+import com.kuducrud.job.DropPrefixService;
 import com.kuducrud.model.TableDetail;
 import org.apache.kudu.ColumnSchema;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -33,6 +34,12 @@ public class TableController {
             throw ApiException.badRequest("table 参数不能为空");
         }
         return registry.current().schema().detail(table);
+    }
+
+    /** 按前缀删表前的预览：命中的完整表名 + 被跳过的系统表数量。 */
+    @GetMapping("/tables/prefix")
+    public DropPrefixService.PrefixPreview prefixPreview(@RequestParam("prefix") String prefix) {
+        return registry.current().dropPrefix().preview(prefix);
     }
 
     /** 前端下拉用的枚举值。 */

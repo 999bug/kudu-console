@@ -17,6 +17,7 @@
 | 行级 CRUD | 条件查询 + 分页、单行/批量 INSERT / UPSERT / UPDATE / DELETE，逐行错误返回 |
 | 表级 DDL | 可视化建表（列定义 + hash/range 分区 + 预览）、删表（表列表行内删除 / 表详情高级页）、重命名、加列、删列、改副本数 |
 | 删库 | Kudu 没有真正的库，库只是表名前缀：一键删除该前缀下所有表，异步任务带进度与取消，删前需手输库名并列出全部表 |
+| 按前缀删表 | 任意表名前缀匹配（忽略大小写，同时覆盖 `impala::` 托管表），先预览命中清单再异步逐张删除；系统表自动跳过，可取消 |
 | 清空数据 | Kudu 无 truncate，用「扫描主键 + 批量 Delete」异步任务实现，带进度与取消 |
 | 任务中心 | 查看清空任务进度、取消，任务带平台归属 |
 
@@ -353,6 +354,8 @@ kudu-console/
 | POST | `/api/table/replicas?table=` | 改副本数 |
 | POST | `/api/jobs/truncate?table=` | 提交清空任务 |
 | POST | `/api/jobs/drop-db?db=` | 提交删库任务（body 需 `confirm=<库名>`、`acknowledge=true`） |
+| GET | `/api/tables/prefix?prefix=` | 按前缀删表预览（命中的完整表名、被跳过的系统表数量） |
+| POST | `/api/jobs/drop-prefix?prefix=` | 提交按前缀删表任务（body 需 `confirm=<前缀>`、`acknowledge=true`） |
 | GET | `/api/jobs`、`/api/jobs/{id}` | 任务列表/详情（带平台 id） |
 | POST | `/api/jobs/{id}/cancel` | 取消任务 |
 
@@ -368,6 +371,7 @@ kudu-console/
 
 - **多平台隔离**：每个平台一个 `ClusterRuntime`（独立 KuduClient、表缓存、Web UI 统计缓存），配置存 `config/clusters.json`；某个平台连不上只影响它自己。平台按需懒建连，不会在启动时把所有集群都连一遍。
 - **删库是批量的，不是原子的**：按前缀逐个 `deleteTable`，中途失败会继续删剩下的表，最终在任务结果里列出成功的张数与失败原因；删库前会拒绝执行，如果该库下有表正跑着 truncate。Impala 托管表也能删，但删完要在 Impala 里 `INVALIDATE METADATA`。
+- **按前缀删表匹配完整表名**：忽略大小写，同时比对剥离 `impala::` 后的名字（前缀 `db.` 能命中 `db.t1` 与 `impala::db.t2`）；前缀按字面量处理，`*` / `%` 不做通配；`sys.*` / `kudu.*` 系统表永不删除，预览里只报告跳过数量。与运行中的单表、删库或相交前缀任务冲突时拒绝提交。
 - **分页是「扫描 + 跳过 offset」**：Kudu 没有 OFFSET，且 hash 分区下扫描不保证主键全局有序，因此不做主键游标翻页。`limit ≤ 500`、`offset ≤ 10000`、单次扫描 ≤ 50000 行，超限直接拒绝，避免拖垮 tserver。行数只给估算值，不跑 `COUNT(*)`。
 - **只支持 AND**：Kudu 谓词无 OR。`NE` 与 `PREFIX` 的后缀校验在客户端完成（响应里 `clientFiltered=true`）；`NE` 按 SQL 语义排除 NULL。
 - **写入无事务**：`MANUAL_FLUSH` 分批提交，失败行逐条返回，已提交的行不会回滚。
@@ -380,7 +384,7 @@ kudu-console/
 ## 测试
 
 ```bash
-mvn test          # 15 个单元测试：类型转换、表名解析、DDL 校验
+mvn test          # 单元测试：类型转换、表名解析、前缀匹配、任务冲突、DDL 校验
 ```
 
 接口冒烟（会对集群建临时表再删掉，需要控制台已启动）：

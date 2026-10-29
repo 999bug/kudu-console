@@ -3,7 +3,7 @@ package com.kuducrud.model;
 import com.fasterxml.jackson.annotation.JsonInclude;
 
 /**
- * 异步任务视图（当前只有 truncate）。
+ * 异步任务视图（清空表 / 删库 / 按前缀删表）。
  */
 @JsonInclude(JsonInclude.Include.NON_NULL)
 public record JobView(

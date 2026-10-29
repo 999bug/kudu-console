@@ -208,4 +208,46 @@ check("drop table", status == 200, res)
 status, res = call("GET", "/api/table", {"table": TABLE})
 check("dropped table gone", status == 404, (status, res))
 
+# 12. 按前缀删表（预览 + 异步任务）
+PREFIX = "crudtest.ptest_" + str(int(time.time())) + "."
+
+
+def create_simple(name):
+    return call("POST", "/api/table/create", body={
+        "name": name,
+        "numReplicas": 1,
+        "columns": [{"name": "id", "type": "INT32", "key": True, "nullable": False}],
+        "hashPartitions": [{"columns": ["id"], "buckets": 2, "seed": 0}],
+        "rangePartitionColumns": [],
+        "rangePartitions": []
+    })
+
+
+for suffix in ("a", "b"):
+    status, res = create_simple(PREFIX + suffix)
+    check("create prefix table " + suffix, status == 200, res)
+
+status, preview = call("GET", "/api/tables/prefix", {"prefix": PREFIX})
+check("prefix preview", status == 200 and preview["count"] == 2, preview)
+check("prefix preview lists tables", sorted(preview["tables"]) == [PREFIX + "a", PREFIX + "b"], preview)
+
+status, res = call("POST", "/api/jobs/drop-prefix", {"prefix": PREFIX},
+                   {"confirm": "wrong", "acknowledge": True})
+check("prefix drop requires confirm", status == 400 and res["code"] == "CONFIRM_REQUIRED", (status, res))
+
+status, job = call("POST", "/api/jobs/drop-prefix", {"prefix": PREFIX},
+                   {"confirm": PREFIX, "acknowledge": True})
+check("prefix drop accepted", status == 200 and job["type"] == "DROP_PREFIX", job)
+for _ in range(60):
+    time.sleep(0.5)
+    status, job = call("GET", "/api/jobs/" + job["id"])
+    if job["state"] in ("SUCCEEDED", "FAILED", "CANCELED"):
+        break
+check("prefix drop succeeded", job["state"] == "SUCCEEDED" and job["deleted"] == 2, job)
+
+status, listing = call("GET", "/api/tables")
+remaining = [t["name"] for group in listing.get("dbs", [])
+             for t in group.get("tables", []) if t["name"].startswith(PREFIX)]
+check("prefix tables gone", not remaining, remaining)
+
 print("\nALL SMOKE TESTS PASSED")
