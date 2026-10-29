@@ -14,6 +14,7 @@ import com.kuducrud.service.DdlService;
 import com.kuducrud.service.RowService;
 import com.kuducrud.service.TableCatalogService;
 import com.kuducrud.service.TableSchemaService;
+import com.kuducrud.service.TestActionService;
 import com.kuducrud.service.webui.MasterWebUiClient;
 
 /**
@@ -33,6 +34,7 @@ public class ClusterRuntime {
     private final TruncateService truncate;
     private final DropDbService dropDb;
     private final DropPrefixService dropPrefix;
+    private final TestActionService testActions;
 
     public ClusterRuntime(ClusterConfig config, KuduProperties props, ObjectMapper mapper, JobRegistry jobs) {
         this.config = config;
@@ -43,12 +45,14 @@ public class ClusterRuntime {
         this.webUi = new MasterWebUiClient(config, connection, props, mapper);
         this.catalog = new TableCatalogService(connection, webUi);
         this.schema = new TableSchemaService(connection, catalog, props);
-        this.rows = new RowService(connection, new KuduSessionTemplate(connection, props), props);
+        KuduSessionTemplate session = new KuduSessionTemplate(connection, props);
+        this.rows = new RowService(connection, session, props);
         this.ddl = new DdlService(connection);
         this.status = new ClusterStatusService(connection, webUi, config);
         this.truncate = new TruncateService(connection, jobs, props, config.id());
         this.dropDb = new DropDbService(connection, jobs, config.id());
         this.dropPrefix = new DropPrefixService(connection, jobs, config.id());
+        this.testActions = new TestActionService(connection, ddl, session, jobs, props, mapper, config.id());
     }
 
     public ClusterConfig config() {
@@ -97,6 +101,10 @@ public class ClusterRuntime {
 
     public DropPrefixService dropPrefix() {
         return dropPrefix;
+    }
+
+    public TestActionService testActions() {
+        return testActions;
     }
 
     public ClusterStatus statusSnapshot() {

@@ -99,5 +99,17 @@ export const api = {
     request('POST', '/api/jobs/drop-prefix', { params: { prefix }, body: { confirm, acknowledge: true } }),
   jobs: () => request('GET', '/api/jobs'),
   job: (id) => request('GET', '/api/jobs/' + id),
-  cancelJob: (id) => request('POST', `/api/jobs/${id}/cancel`)
+  cancelJob: (id) => request('POST', `/api/jobs/${id}/cancel`),
+
+  // 备份测试
+  testMeta: () => request('GET', '/api/test/meta'),
+  runTestOps: (tables, actions) => request('POST', '/api/test/run', { body: { tables, actions } }),
+  listTestSchedules: () => request('GET', '/api/test/schedules'),
+  createTestSchedule: (body) => request('POST', '/api/test/schedules', { body }),
+  updateTestSchedule: (id, body) => request('PUT', '/api/test/schedules/' + id, { body }),
+  deleteTestSchedule: (id) => request('DELETE', '/api/test/schedules/' + id),
+  runTestSchedule: (id) => request('POST', `/api/test/schedules/${id}/run`),
+  toggleTestSchedule: (id, enabled) =>
+    request('POST', `/api/test/schedules/${id}/toggle`, { body: { enabled } }),
+  testScheduleRuns: (id) => request('GET', `/api/test/schedules/${id}/runs`)
 }

@@ -19,7 +19,8 @@
 | 删库 | Kudu 没有真正的库，库只是表名前缀：一键删除该前缀下所有表，异步任务带进度与取消，删前需手输库名并列出全部表 |
 | 按前缀删表 | 任意表名前缀匹配（忽略大小写，同时覆盖 `impala::` 托管表），先预览命中清单再异步逐张删除；系统表自动跳过，可取消 |
 | 清空数据 | Kudu 无 truncate，用「扫描主键 + 批量 Delete」异步任务实现，带进度与取消 |
-| 任务中心 | 查看清空任务进度、取消，任务带平台归属 |
+| 测试调度 | 多选表后一键删除数据 / 加列 / 添加数据，可立即执行或按固定间隔重复；用于验证全量、增量备份是否捕获变更 |
+| 任务中心 | 查看清空、删库、按前缀删表、测试调度任务进度，取消任务，任务带平台归属 |
 
 查询条件支持 `EQ / NE / LT / LTE / GT / GTE / IN / IS_NULL / IS_NOT_NULL / PREFIX`，仅 AND 组合。
 
@@ -356,6 +357,11 @@ kudu-console/
 | POST | `/api/jobs/drop-db?db=` | 提交删库任务（body 需 `confirm=<库名>`、`acknowledge=true`） |
 | GET | `/api/tables/prefix?prefix=` | 按前缀删表预览（命中的完整表名、被跳过的系统表数量） |
 | POST | `/api/jobs/drop-prefix?prefix=` | 提交按前缀删表任务（body 需 `confirm=<前缀>`、`acknowledge=true`） |
+| POST | `/api/test/run` | 立即执行测试动作（body 含 `tables` 与 `actions`） |
+| GET/POST | `/api/test/schedules` | 定时任务列表 / 新建 |
+| PUT/DELETE | `/api/test/schedules/{id}` | 编辑 / 删除定时任务 |
+| POST | `/api/test/schedules/{id}/run`、`/toggle` | 立即执行一次 / 启用暂停 |
+| GET | `/api/test/schedules/{id}/runs` | 最近执行记录 |
 | GET | `/api/jobs`、`/api/jobs/{id}` | 任务列表/详情（带平台 id） |
 | POST | `/api/jobs/{id}/cancel` | 取消任务 |
 
@@ -372,6 +378,8 @@ kudu-console/
 - **多平台隔离**：每个平台一个 `ClusterRuntime`（独立 KuduClient、表缓存、Web UI 统计缓存），配置存 `config/clusters.json`；某个平台连不上只影响它自己。平台按需懒建连，不会在启动时把所有集群都连一遍。
 - **删库是批量的，不是原子的**：按前缀逐个 `deleteTable`，中途失败会继续删剩下的表，最终在任务结果里列出成功的张数与失败原因；删库前会拒绝执行，如果该库下有表正跑着 truncate。Impala 托管表也能删，但删完要在 Impala 里 `INVALIDATE METADATA`。
 - **按前缀删表匹配完整表名**：忽略大小写，同时比对剥离 `impala::` 后的名字（前缀 `db.` 能命中 `db.t1` 与 `impala::db.t2`）；前缀按字面量处理，`*` / `%` 不做通配；`sys.*` / `kudu.*` 系统表永不删除，预览里只报告跳过数量。与运行中的单表、删库或相交前缀任务冲突时拒绝提交。
+- **测试调度是「造变更」不是备份**：删除随机主键行、按 schema 生成新行（整型主键取扫描最大值+1，字符串主键带运行种子，复合主键逐列递增），修改表结构只支持加可空列（Kudu 不能改列类型）。`REPLACE` 模式会先删上一轮自动加的 `bk_test_` 列再加新列，避免列无限增长；手动重复执行也记住上一轮的列。
+- **测试任务按固定间隔轮询**：间隔 1 分钟~24 小时，可设最多执行次数与结束时间；同一任务上一轮未结束、或与 truncate / 删表 / 删库冲突时跳过本轮并记录。配置存 `config/test-schedules.json`，重启保留，服务停机错过的时间点只补跑一次。
 - **分页是「扫描 + 跳过 offset」**：Kudu 没有 OFFSET，且 hash 分区下扫描不保证主键全局有序，因此不做主键游标翻页。`limit ≤ 500`、`offset ≤ 10000`、单次扫描 ≤ 50000 行，超限直接拒绝，避免拖垮 tserver。行数只给估算值，不跑 `COUNT(*)`。
 - **只支持 AND**：Kudu 谓词无 OR。`NE` 与 `PREFIX` 的后缀校验在客户端完成（响应里 `clientFiltered=true`）；`NE` 按 SQL 语义排除 NULL。
 - **写入无事务**：`MANUAL_FLUSH` 分批提交，失败行逐条返回，已提交的行不会回滚。
@@ -384,7 +392,7 @@ kudu-console/
 ## 测试
 
 ```bash
-mvn test          # 单元测试：类型转换、表名解析、前缀匹配、任务冲突、DDL 校验
+mvn test          # 单元测试：类型转换、表名解析、前缀匹配、任务冲突、测试数据生成、DDL 校验
 ```
 
 接口冒烟（会对集群建临时表再删掉，需要控制台已启动）：

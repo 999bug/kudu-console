@@ -29,13 +29,13 @@ public class JobRegistry {
     private static final int MAX_JOBS = 50;
 
     /** 资源键前缀：单表任务、删库任务、按前缀删表任务。 */
-    static final String TABLE_KEY = "t:";
-    static final String DB_KEY = "d:";
-    static final String PREFIX_KEY = "p:";
+    public static final String TABLE_KEY = "t:";
+    public static final String DB_KEY = "d:";
+    public static final String PREFIX_KEY = "p:";
 
     private final Map<String, JobHandle> jobs = new ConcurrentHashMap<>();
     private final Set<String> runningKeys = ConcurrentHashMap.newKeySet();
-    private final Map<String, String> jobLocks = new ConcurrentHashMap<>();
+    private final Map<String, List<String>> jobLocks = new ConcurrentHashMap<>();
     private final ExecutorService executor;
 
     public JobRegistry() {
@@ -58,7 +58,35 @@ public class JobRegistry {
         }
         String id = UUID.randomUUID().toString().replace("-", "").substring(0, 16);
         JobHandle handle = new JobHandle(id, type, clusterId, target);
-        jobLocks.put(id, resourceKey);
+        jobLocks.put(id, List.of(resourceKey));
+        jobs.put(id, handle);
+        trim();
+        return handle;
+    }
+
+    /**
+     * 批量任务：一次性占用多张表的表级锁，任意一张被占用就整体失败。
+     * <p>供备份测试这类会同时读写多张表的任务使用，避免与 truncate / 删表并发。
+     */
+    public JobHandle createBatch(String type, String clusterId, String target, List<String> tables, String lockLabel) {
+        List<String> keys = new ArrayList<>();
+        List<String> acquired = new ArrayList<>();
+        for (String table : tables) {
+            String key = tableKey(clusterId, table);
+            if (keys.contains(key)) {
+                continue;
+            }
+            keys.add(key);
+            if (!runningKeys.add(key)) {
+                acquired.forEach(runningKeys::remove);
+                throw ApiException.conflict("JOB_CONFLICT",
+                        lockLabel + "：表 " + table + " 正在执行其他任务，请等待其结束");
+            }
+            acquired.add(key);
+        }
+        String id = UUID.randomUUID().toString().replace("-", "").substring(0, 16);
+        JobHandle handle = new JobHandle(id, type, clusterId, target);
+        jobLocks.put(id, List.copyOf(keys));
         jobs.put(id, handle);
         trim();
         return handle;
@@ -85,9 +113,9 @@ public class JobRegistry {
     }
 
     public void release(JobHandle handle) {
-        String key = jobLocks.remove(handle.id());
-        if (key != null) {
-            runningKeys.remove(key);
+        List<String> keys = jobLocks.remove(handle.id());
+        if (keys != null) {
+            keys.forEach(runningKeys::remove);
         }
     }
 

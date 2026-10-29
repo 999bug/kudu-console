@@ -250,4 +250,31 @@ remaining = [t["name"] for group in listing.get("dbs", [])
              for t in group.get("tables", []) if t["name"].startswith(PREFIX)]
 check("prefix tables gone", not remaining, remaining)
 
+# 13. 备份测试动作（删数据 / 加列 / 加数据）
+OPS_TABLE = "crudtest.optest_" + str(int(time.time()))
+status, res = create_simple(OPS_TABLE)
+check("create ops table", status == 200, res)
+
+status, job = call("POST", "/api/test/run", body={
+    "tables": [OPS_TABLE],
+    "actions": {"deleteRows": True, "deleteCount": 1,
+                "addRows": True, "addCount": 2,
+                "addColumn": True, "columnType": "STRING", "columnMode": "REPLACE"}
+})
+check("test ops accepted", status == 200 and job["type"] == "TEST_MUTATE", job)
+for _ in range(60):
+    time.sleep(0.5)
+    status, job = call("GET", "/api/jobs/" + job["id"])
+    if job["state"] in ("SUCCEEDED", "FAILED", "CANCELED"):
+        break
+check("test ops succeeded", job["state"] == "SUCCEEDED", job)
+
+status, q = call("POST", "/api/table/query", {"table": OPS_TABLE}, {"limit": 10})
+check("test ops added rows", status == 200 and q["returned"] == 2, q)
+status, detail = call("GET", "/api/table", {"table": OPS_TABLE})
+check("test ops added column",
+      any(c["name"].startswith("bk_test_") for c in detail["columns"]), detail["columns"])
+status, res = call("POST", "/api/table/drop", {"table": OPS_TABLE}, {"confirm": OPS_TABLE})
+check("drop ops table", status == 200, res)
+
 print("\nALL SMOKE TESTS PASSED")
