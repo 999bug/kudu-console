@@ -60,6 +60,32 @@ curl -s http://127.0.0.1:8088/api/meta/version
 
 浏览器打开 `http://<服务器IP>:8088/`：顶栏有版本号、集群状态页出现 LEADER / FOLLOWER，就部署成功了。
 
+## 查看日志
+
+**docker 标准输出**（启动过程、实时报错最直接）：
+
+```bash
+# 实时跟踪
+cd /opt/kudu-console
+sudo docker compose -f docker-compose.prod.yml logs -f
+
+# 只看最近 200 行
+sudo docker compose -f docker-compose.prod.yml logs --tail 200
+```
+
+**应用日志文件**（落盘持久化，查历史问题用这个）：
+
+```bash
+# 实时跟踪
+tail -f /opt/kudu-console/data/logs/kudu-console.log
+
+# 找报错
+grep -i error /opt/kudu-console/data/logs/kudu-console.log | tail -20
+```
+
+- `data/logs/` 是挂载卷，容器升级 / 回滚后日志仍在
+- cron 自动更新的输出在同目录 `data/logs/auto-update.log`
+
 ## 自动更新（可选）
 
 `.env` 用 `latest` 时，挂一个 cron 每 5 分钟检查并自动换新镜像：
