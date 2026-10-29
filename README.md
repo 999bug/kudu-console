@@ -191,6 +191,8 @@ IMAGE=crpi-jzu3y0vlo2kdv4a1.cn-shanghai.personal.cr.aliyuncs.com/kuducrud/kudu-c
 
 > 仓库默认私有，服务器需要 `docker login` 一次；固定密码不会过期。
 
+阿里云 ACR 从建仓、配 Secrets 到虚拟机拉取与自动更新的完整步骤，见 **[ALIYUN-ACR.md](ALIYUN-ACR.md)**。
+
 #### 七、首次拉取太慢 / 完全断网
 
 绕过 ghcr.io 的首次全量下载，但**不放弃后续的增量更新**——这是推荐给国内网络的做法。
@@ -456,4 +458,4 @@ KUDU_CONSOLE_URL=http://localhost:9090 python tools/api-smoke.py
 
 为什么不能部署到 GitHub Pages：这是 JVM 进程 + Kudu 客户端，静态托管跑不了 Java，也连不到内网集群。
 
-内网直连、Cloudflare Tunnel、公网反代 + Basic Auth、离线部署与故障排查见 **[DEPLOY.md](DEPLOY.md)**。
+内网直连、Cloudflare Tunnel、公网反代 + Basic Auth、离线部署与故障排查见 **[DEPLOY.md](DEPLOY.md)**；阿里云 ACR 同步与国内服务器拉取见 **[ALIYUN-ACR.md](ALIYUN-ACR.md)**。
