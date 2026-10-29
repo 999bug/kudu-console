@@ -152,6 +152,11 @@ jobs:
             echo "未配置 ACR_* secrets，跳过国内镜像同步"
             exit 0
           fi
+          # 容错：去掉粘贴时混入的换行 / 空格（否则 docker login 会报 invalid control character）
+          ACR_REGISTRY="$(printf '%s' "$ACR_REGISTRY" | tr -d '[:space:]')"
+          ACR_NAMESPACE="$(printf '%s' "$ACR_NAMESPACE" | tr -d '[:space:]')"
+          ACR_USERNAME="$(printf '%s' "$ACR_USERNAME" | tr -d '[:space:]')"
+          ACR_PASSWORD="$(printf '%s' "$ACR_PASSWORD" | tr -d '[:space:]')"
           V="${{ steps.ver.outputs.value }}"
           SRC="ghcr.io/${{ github.repository_owner }}/kudu-console:$V"
           DST="$ACR_REGISTRY/$ACR_NAMESPACE/kudu-console"
