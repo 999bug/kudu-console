@@ -111,5 +111,12 @@ export const api = {
   runTestSchedule: (id) => request('POST', `/api/test/schedules/${id}/run`),
   toggleTestSchedule: (id, enabled) =>
     request('POST', `/api/test/schedules/${id}/toggle`, { body: { enabled } }),
-  testScheduleRuns: (id) => request('GET', `/api/test/schedules/${id}/runs`)
+  testScheduleRuns: (id) => request('GET', `/api/test/schedules/${id}/runs`),
+
+  // 表比对
+  compareMeta: () => request('GET', '/api/compare/meta'),
+  compareTables: (cluster) => request('GET', '/api/compare/tables', { params: { cluster } }),
+  startCompare: (body) => request('POST', '/api/compare', { body }),
+  compareTask: (id) => request('GET', '/api/compare/' + id),
+  cancelCompare: (id) => request('POST', `/api/compare/${id}/cancel`)
 }

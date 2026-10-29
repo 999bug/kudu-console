@@ -12,6 +12,7 @@ const router = useRouter()
 const navItems = [
   { path: '/cluster', label: '集群状态' },
   { path: '/tables', label: '表管理' },
+  { path: '/compare', label: '表比对' },
   { path: '/jobs', label: '任务中心' },
   { path: '/test-ops', label: '测试调度' },
   { path: '/clusters', label: 'Kudu 平台' }

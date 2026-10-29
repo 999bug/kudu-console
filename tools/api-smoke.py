@@ -277,4 +277,41 @@ check("test ops added column",
 status, res = call("POST", "/api/table/drop", {"table": OPS_TABLE}, {"confirm": OPS_TABLE})
 check("drop ops table", status == 200, res)
 
+# 14. 表比对（两张同结构表，异步任务）
+def insert_rows(table, rows):
+    return call("POST", "/api/table/rows", {"table": table}, {"op": "INSERT", "rows": rows})
+
+
+CMP_LEFT = "crudtest.cmp_l_" + str(int(time.time()))
+CMP_RIGHT = "crudtest.cmp_r_" + str(int(time.time()))
+status, res = create_simple(CMP_LEFT)
+check("create compare left", status == 200, res)
+status, res = create_simple(CMP_RIGHT)
+check("create compare right", status == 200, res)
+status, res = insert_rows(CMP_LEFT, [{"id": 1}, {"id": 2}])
+check("seed compare left", status == 200 and res["applied"] == 2, res)
+status, res = insert_rows(CMP_RIGHT, [{"id": 1}, {"id": 2}])
+check("seed compare right", status == 200 and res["applied"] == 2, res)
+
+status, task = call("POST", "/api/compare", body={
+    "leftTable": CMP_LEFT,
+    "rightTable": CMP_RIGHT,
+    "compareData": True,
+    "maxRows": 1000,
+    "sampleLimit": 5
+})
+check("compare accepted", status == 200 and task["id"], task)
+for _ in range(120):
+    time.sleep(0.5)
+    status, task = call("GET", "/api/compare/" + task["id"])
+    if task["state"] in ("SUCCEEDED", "FAILED", "CANCELED"):
+        break
+check("compare succeeded", task["state"] == "SUCCEEDED", task)
+check("compare consistent", task["result"]["consistent"] is True
+      and task["result"]["data"]["matched"] == 2, task.get("result"))
+
+for table in (CMP_LEFT, CMP_RIGHT):
+    status, res = call("POST", "/api/table/drop", {"table": table}, {"confirm": table})
+    check("drop compare table " + table, status == 200, res)
+
 print("\nALL SMOKE TESTS PASSED")

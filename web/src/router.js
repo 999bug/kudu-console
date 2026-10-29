@@ -5,6 +5,7 @@ import TableDetailView from './views/TableDetailView.vue'
 import JobsView from './views/JobsView.vue'
 import ClustersView from './views/ClustersView.vue'
 import TestOpsView from './views/TestOpsView.vue'
+import CompareView from './views/CompareView.vue'
 
 const router = createRouter({
   history: createWebHistory(),
@@ -13,6 +14,7 @@ const router = createRouter({
     { path: '/cluster', component: ClusterView, meta: { title: '集群状态' } },
     { path: '/tables', component: TablesView, meta: { title: '表管理' } },
     { path: '/table', component: TableDetailView, meta: { title: '表详情' } },
+    { path: '/compare', component: CompareView, meta: { title: '表比对' } },
     { path: '/jobs', component: JobsView, meta: { title: '任务中心' } },
     { path: '/test-ops', component: TestOpsView, meta: { title: '测试调度' } },
     { path: '/clusters', component: ClustersView, meta: { title: 'Kudu 平台' } },
