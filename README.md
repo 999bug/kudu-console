@@ -2,9 +2,7 @@
 
 [![CI](https://github.com/999bug/kudu-crud/actions/workflows/ci.yml/badge.svg)](https://github.com/999bug/kudu-crud/actions/workflows/ci.yml)
 
-测试环境用的 Apache Kudu 管理台：一个 Java 进程同时提供 REST 接口与 Vue 前端页面，前后端在同一个工程目录内，一条命令启动。
-
-支持**多个 Kudu 平台**：在界面里添加任意多套 master 地址，侧栏一键切换；每个平台独立建连、独立缓存，某个平台连不上不会影响其它平台。启动时只从 `application.yml` 初始化第一个平台，之后以 `config/clusters.json` 为准。
+测试环境用的 Apache Kudu 管理台：一个 Java 进程同时提供 REST 接口与 Vue 前端页面，Docker 一条命令部署。支持**多个 Kudu 平台**一键切换，每个平台独立建连、独立缓存，某个平台连不上不影响其它平台。
 
 ## 功能
 
@@ -16,264 +14,99 @@
 | 表清单 | 按库分组（Kudu 无 catalog，`db` 取自表名前缀）、搜索、行数与磁盘占用（master 统计估算）、impala 托管表标记 |
 | 表结构 | 列名/类型/主键/可空/precision/scale/length/编码/压缩/默认值/注释、副本数、hash 与 range 分区、分区边界 |
 | 行级 CRUD | 条件查询 + 分页、单行/批量 INSERT / UPSERT / UPDATE / DELETE，逐行错误返回 |
-| 表级 DDL | 可视化建表（列定义 + hash/range 分区 + 预览）、删表（表列表行内删除 / 表详情高级页）、重命名、加列、删列、改副本数 |
-| 删库 | Kudu 没有真正的库，库只是表名前缀：一键删除该前缀下所有表，异步任务带进度与取消，删前需手输库名并列出全部表 |
-| 按前缀删表 | 任意表名前缀匹配（忽略大小写，同时覆盖 `impala::` 托管表），先预览命中清单再异步逐张删除；系统表自动跳过，可取消 |
+| 表级 DDL | 可视化建表（列定义 + hash/range 分区 + 预览）、删表、重命名、加列、删列、改副本数 |
+| 删库 / 按前缀删表 | 库只是表名前缀：预览命中清单后异步逐张删除，系统表自动跳过，可取消 |
 | 清空数据 | Kudu 无 truncate，用「扫描主键 + 批量 Delete」异步任务实现，带进度与取消 |
-| 测试调度 | 多选表后一键删除数据 / 加列 / 添加数据，可立即执行或按固定间隔重复；用于验证全量、增量备份是否捕获变更 |
-| 表比对 | 选两张表（可跨平台）比对列结构、主键与全量行内容；报目标缺失 / 多出 / 内容不一致及样本，异步显示进度 |
-| 任务中心 | 查看清空、删库、按前缀删表、测试调度任务进度，取消任务，任务带平台归属 |
+| 测试调度 | 多选表后一键删除数据 / 加列 / 添加数据，可立即执行或按固定间隔重复；用于验证备份是否捕获变更 |
+| 表比对 | 选两张表（可跨平台）比对列结构、主键与全量行内容；报目标缺失 / 多出 / 内容不一致及样本 |
+| 任务中心 | 查看各类异步任务进度并取消，任务带平台归属 |
 
 查询条件支持 `EQ / NE / LT / LTE / GT / GTE / IN / IS_NULL / IS_NOT_NULL / PREFIX`，仅 AND 组合。
 
-## 快速开始
+## 一键部署（Docker）
 
-### Docker 部署（推荐）
+前提：一台能连通 Kudu master 的机器，装好 Docker 20.10+ 与 Compose v2。
 
-服务器只需要 Docker 20.10+ 和 Compose v2，不用装 JDK / Maven / Node —— 镜像里已经打包好 JRE、前端页面和全部依赖。
+**1. 把两个文件放到服务器 `/opt/kudu-console/`**（本仓库根目录就有）：
 
-镜像由流水线在每次 push 后自动构建，服务器只负责拉取。
+- `docker-compose.prod.yml`
+- `.env`（复制 `.env.example` 改）
 
-#### 一、首次部署
-
-服务器上不了 GitHub 也没关系：只从有网的机器传两个小文件过去，不用 clone 源码。
-
-**1. 传文件**（在 Windows / 有网的机器上执行）
-
-```bash
-scp docker-compose.prod.yml root@<服务器IP>:/opt/kudu-console/
-scp .env.example root@<服务器IP>:/opt/kudu-console/.env
-```
-
-**2. 配置**（在服务器上）
-
-```bash
-cd /opt/kudu-console
-mkdir -p data/config data/logs
-vi .env
-```
-
-`.env` 至少改这两项：
+**2. 编辑 `.env`**
 
 ```env
+HOST_PORT=8088
 KUDU_MASTERS=192.168.46.23:7051,192.168.46.23:7151,192.168.46.23:7251
-IMAGE=ghcr.io/999bug/kudu-console:v1.0.1
+JAVA_OPTS=-Xms1024m -Xmx4g
+IMAGE=ghcr.io/999bug/kudu-console:latest
+TUNNEL_TOKEN=
 ```
+
+- `KUDU_MASTERS` 是 Kudu 集群 master 地址，只影响首次初始化，之后以 `data/config/clusters.json` 为准
+- 国内机器把 `IMAGE` 换成阿里云 ACR 地址，步骤见 **[ALIYUN-ACR.md](ALIYUN-ACR.md)**
 
 **3. 启动**
 
 ```bash
-docker compose -f docker-compose.prod.yml up -d
+cd /opt/kudu-console
+sudo docker compose -f docker-compose.prod.yml up -d
 ```
-
-首次要拉完整镜像（约 137MB，含 JRE 与全部依赖），耗时取决于到 ghcr.io 的网络。慢的话挂着让它跑就行——`docker pull` 按层下载，中断后重试会复用已完成的层。
-
-实在等不了就走**离线包**：先导入再启动，之后照样走增量更新，见第七节。
 
 **4. 验证**
 
 ```bash
-docker compose -f docker-compose.prod.yml ps
-curl -s http://127.0.0.1:8088/api/cluster/status | head -c 300
-```
-
-浏览器打开 `http://<服务器IP>:8088/`，集群状态页出现 LEADER / FOLLOWER 就成功了。
-
-#### 二、更新代码
-
-**1. 推送**（本地）
-
-```bash
-git add <改动文件> && git commit -m "说明"
-git push origin main
-```
-
-流水线自动完成：跑测试 → 构建前端 → 打包 jar → 构建镜像 → 推 ghcr.io → 自动打 tag（`v1.0.2`、`v1.0.3`…）→ 发布 Release。**不用手动打 tag。**
-
-**2. 换版本**（服务器）
-
-```bash
-cd /opt/kudu-console
-docker compose -f docker-compose.prod.yml pull
-docker compose -f docker-compose.prod.yml up -d
-```
-
-`up -d` 发现镜像变了会自动重建容器，`data/` 里的配置和日志不受影响。
-
-**3. 确认版本**（服务器）
-
-```bash
 curl -s http://127.0.0.1:8088/api/meta/version
-docker inspect kudu-console --format '{{.Config.Image}}'
 ```
 
-接口返回 `version / commit / buildTime / image`；页面顶栏也会显示 `v1.0.x · commit`，悬停可看构建时间与镜像。用 `latest` 时，cron 拉到新镜像后顶栏版本号会跟着变。
+浏览器打开 `http://<服务器IP>:8088/`：顶栏有版本号、集群状态页出现 LEADER / FOLLOWER，就部署成功了。
 
-**是增量下载**：镜像按 Spring Boot 分层构建，依赖（35MB）和业务代码（约 1MB）是不同的层。只改业务代码时，`pull` 只下 1MB 左右，不会重传依赖。只有改 `pom.xml` 或基础镜像才会动到大层。
+## 自动更新（可选）
 
-想彻底不用管，挂个 cron 每 5 分钟检查一次：
+`.env` 用 `latest` 时，挂一个 cron 每 5 分钟检查并自动换新镜像：
 
 ```cron
 */5 * * * * cd /opt/kudu-console && docker compose -f docker-compose.prod.yml pull -q && docker compose -f docker-compose.prod.yml up -d >> data/logs/auto-update.log 2>&1
 ```
 
-> cron 全自动必须用 `IMAGE=...:latest`，固定版本号不会被动更新。升级是否生效可以看页面顶栏的版本号，或 `curl -s http://127.0.0.1:8088/api/meta/version`。
+固定 tag 不会被动更新；生产环境需要锁定版本时把 `IMAGE` 改成具体 tag。
 
-#### 三、回滚
-
-改 `.env` 里的版本号再 `up -d`：
-
-```env
-IMAGE=ghcr.io/999bug/kudu-console:v1.0.1
-```
+## 更新与回滚
 
 ```bash
-docker compose -f docker-compose.prod.yml up -d
-```
-
-历史版本都在 [Releases](https://github.com/999bug/kudu-crud/releases)，tag 永久保留。
-
-#### 四、常用命令
-
-```bash
-docker compose -f docker-compose.prod.yml ps         # 状态
-docker compose -f docker-compose.prod.yml logs -f    # 实时日志
-docker compose -f docker-compose.prod.yml restart    # 重启
-docker compose -f docker-compose.prod.yml down       # 停止并删除容器（data/ 不受影响）
-```
-
-嫌 `-f` 太长就先 `export COMPOSE_FILE=docker-compose.prod.yml`，之后直接 `docker compose ps`。
-
-#### 五、公网访问
-
-不占公网 IP、不开端口，走 Cloudflare 隧道：
-
-1. `.env` 填 `TUNNEL_TOKEN=...`
-2. Zero Trust 里配 Public Hostname，指向 `http://kudu-console:8088`
-3. 启动带隧道的编排：
-
-```bash
-docker compose -f docker-compose.prod.yml --profile tunnel up -d
-```
-
-**务必同时配 Access 策略**（邮箱白名单）。这个控制台没有登录鉴权，能删表删库，裸挂公网等于把数据库交出去。
-
-#### 六、国内镜像仓库（可选）
-
-ghcr.io 在国外，首次拉 139MB 会慢。可以同步一份到国内的容器仓库，之后从国内拉。以阿里云 ACR 为例（个人版免费）：
-
-1. 阿里云控制台 → 容器镜像服务 → 开通个人版 → 创建命名空间（如 `kuducrud`），并在该命名空间下建好仓库 `kudu-console`（或开启 push 自动建仓）
-2. 该实例 → 访问凭证 → 设置**固定密码**（不是临时 token，不会过期）
-3. GitHub 仓库 → Settings → Secrets and variables → Actions，添加四个：
-
-| Secret 名称 | 值（以新版个人实例为例） |
-| --- | --- |
-| `ACR_REGISTRY` | **必须和服务器 `docker login` 的域名完全一致**，如 `crpi-jzu3y0vlo2kdv4a1.cn-shanghai.personal.cr.aliyuncs.com`（旧版个人版则是 `registry.cn-hangzhou.aliyuncs.com`） |
-| `ACR_NAMESPACE` | 命名空间，如 `kuducrud` |
-| `ACR_USERNAME` | 访问凭证页的用户名，如 `996icu007` |
-| `ACR_PASSWORD` | 第 2 步设置的固定密码 |
-
-配好后下次 push 会自动同步一份过去，Actions 日志里能看到 `已同步到 ...`。没配就自动跳过；**同步失败不会阻塞发版**（tag 和 Release 照常产出），日志里会给出具体原因，修好 secrets 后在 Actions 里对该次运行点 `Re-run failed jobs` 即可补同步。
-
-服务器上换成国内地址（域名要和 `docker login` 的一致）：
-
-```bash
-docker login crpi-jzu3y0vlo2kdv4a1.cn-shanghai.personal.cr.aliyuncs.com --username=996icu007
-```
-
-```env
-IMAGE=crpi-jzu3y0vlo2kdv4a1.cn-shanghai.personal.cr.aliyuncs.com/kuducrud/kudu-console:latest
-```
-
-登录报 403 常见原因：`ACR_REGISTRY` 带 `https://` 或与登录域名不一致、用户名不是访问凭证页显示的那个、固定密码没开启（用了登录密码或临时 token）、RAM 用户未被授权。
-
-腾讯云 TCR（`ccr.ccs.tencentyun.com`）、华为云 SWR 用的是同一套 Docker Registry 协议，把 `ACR_REGISTRY` 换成对应域名即可。
-
-> 仓库默认私有，服务器需要 `docker login` 一次；固定密码不会过期。
-
-阿里云 ACR 从建仓、配 Secrets 到虚拟机拉取与自动更新的完整步骤，见 **[ALIYUN-ACR.md](ALIYUN-ACR.md)**。
-
-#### 七、首次拉取太慢 / 完全断网
-
-绕过 ghcr.io 的首次全量下载，但**不放弃后续的增量更新**——这是推荐给国内网络的做法。
-
-**1. 在有网的机器上下载离线包**（这台 Windows 就行）
-
-```bash
-# 文件名带版本号，到 Releases 页面拿实际链接
-curl -fL -O https://github.com/999bug/kudu-crud/releases/download/v1.0.5/kudu-console-image-v1.0.5.tar.gz
-scp kudu-console-image-v1.0.5.tar.gz root@<服务器IP>:/tmp/
-```
-
-**2. 服务器上导入并启动**
-
-```bash
-gunzip -c /tmp/kudu-console-image-v1.0.5.tar.gz | docker load
-docker images | grep kudu-console          # 应能看到 ghcr.io/... 和 kudu-console 两个名字
 cd /opt/kudu-console
-docker compose -f docker-compose.prod.yml up -d
+sudo docker compose -f docker-compose.prod.yml pull
+sudo docker compose -f docker-compose.prod.yml up -d
 ```
 
-包里同时打进了 `ghcr.io/999bug/kudu-console:v1.0.5` 和 `kudu-console:v1.0.5` 两个 tag，和 `.env` 里的 `IMAGE` 对得上，**不需要再 `docker tag`**。
+- 回滚：`.env` 把 `IMAGE` 改回上一个 tag，再 `up -d`
+- `data/` 是挂载卷，升级 / 回滚不丢配置和日志
+- 版本是否生效：`curl -s http://127.0.0.1:8088/api/meta/version`，或看页面顶栏
 
-**3. 之后照常增量更新**
+## 发版方式
 
-```bash
-docker compose -f docker-compose.prod.yml pull
-docker compose -f docker-compose.prod.yml up -d
-```
+**push 到 main 只会跑测试，不会自动发版。** 需要出新镜像时二选一：
 
-本地已有的层和 registry 上的层 digest 一致，`pull` 会直接跳过它们，只下变化的那 0.17MB。所以「离线起步 + 在线增量」是可以长期共存的，不会因为导入过离线包就断了更新链路。
+- **手动触发**：Actions → Release → Run workflow → 分支选 `main` → 版本号留空（自动 `v1.0.<run_number>`）或手填
+- **打 tag**：`git tag v1.0.9 && git push origin v1.0.9`
 
-> 完全隔离的内网环境（连 ghcr.io 都不通）就每版都用离线包覆盖，做法一样，只是每次要换文件名。
+流水线产出：
 
-更完整的离线方案见 [DEPLOY.md](DEPLOY.md) 的「目标机器上不了外网」。
+| 产物 | 用途 |
+| --- | --- |
+| `ghcr.io/999bug/kudu-console:<tag>` 与 `:latest` | Docker 部署与升级 |
+| `kudu-console.jar` + `.sha256` | 直接 `java -jar`，或 systemd 部署 |
+| `kudu-console-image-<tag>.tar.gz` | 完全离线时 `docker load` |
+| 阿里云 ACR `<tag>` 与 `:latest` | 国内服务器拉取（需配置 Secrets，见 ALIYUN-ACR.md） |
 
-#### 八、从源码构建（开发用）
+Release 只保留最近 20 个，tag 全部保留。
 
-上面都是拉现成镜像。要在本机构建镜像，用另一套编排：
+## 文档导航
 
-```bash
-cp .env.example .env
-docker compose up -d --build     # 首次 3~8 分钟，主要在拉 Maven 依赖
-```
-
-升级把新 jar 放进 `release/` 再重启，或运行 `./deploy/upgrade.sh`（自动校验 + 失败回滚）。`release/` 为空时容器用镜像内置的 jar 启动。
-
-### Windows
-
-```bat
-:: 直接启动（默认 8088）
-start.bat
-
-:: 指定端口
-start.bat 9090
-```
-
-`target\kudu-console.jar` 已构建时无需 Maven/Node；缺失时会自动调用 `build.bat` 重新构建。
-
-重新构建：
-
-```bat
-build.bat
-```
-
-### Linux / macOS
-
-```bash
-chmod +x start.sh build.sh
-./start.sh          # 默认 8088
-./start.sh 9090
-./build.sh          # 前端 npm build + mvn package
-```
-
-### 环境要求
-
-- JDK 17
-- 仅构建时需要：Maven 3.6+、Node.js 18+
-- 仅 Docker 方式：Docker 20.10+ 与 Compose v2，无需上面三项
-
-运行日志写在 `logs/kudu-console.log`；平台清单写在 `config/clusters.json`，定时任务写在 `config/test-schedules.json`（都不入库）。
+| 文档 | 内容 |
+| --- | --- |
+| [DEPLOY.md](DEPLOY.md) | 其他部署方式：jar + systemd、离线镜像包、公网访问（Cloudflare Tunnel）、源码构建、故障排查与上线检查清单 |
+| [ALIYUN-ACR.md](ALIYUN-ACR.md) | 阿里云建仓、GitHub Secrets 配置、服务器拉取、自动更新的完整步骤 |
+| [tools/api-smoke.py](tools/api-smoke.py) | 接口冒烟脚本（对集群建临时表再删掉） |
 
 ## 多平台
 
@@ -282,18 +115,6 @@ chmod +x start.sh build.sh
 - 切换平台后，前端会给每个请求带上 `X-Kudu-Cluster: <平台id>`，后端按 id 路由到对应连接；不带该头时用服务端激活的平台（可用 `POST /api/clusters/{id}/activate` 切换）。
 - 每个平台独立持有 KuduClient 与表缓存：连不上只影响该平台（返回 `KUDU_UNAVAILABLE`），其它平台照常。
 - 旧的单平台配置 `config/connection.json` 会在首次启动时自动迁移成一个平台。
-
-## 备份恢复验证
-
-「测试调度」和「表比对」是配套用的，用来验证全量 / 增量备份与恢复是否真的把数据带回来了：
-
-1. 对源表做一次全量备份，记下备份时间点。
-2. 在「测试调度」勾选源表，选择「删除数据 / 修改表结构 / 添加数据」，立即执行一次，或设一个覆盖备份窗口的定时任务（可设间隔、最多次数、结束时间）。
-3. 执行增量备份，让备份工具捕获这些变更。
-4. 在目标端恢复后，打开「表比对」：左侧选源平台 + 源表，右侧选恢复后的平台 + 表，开始比对。
-5. 结果里会分别给出表结构差异、目标缺失 / 目标多出 / 内容不一致的行数与样本；样本包含主键和整行可读内容，可直接定位恢复问题。
-
-注意：比对本身只读，但会把源表整表载入内存（默认上限 20 万行），比对期间应停止写入，否则结果可能自相矛盾。
 
 ## 配置
 
@@ -443,19 +264,4 @@ KUDU_CONSOLE_URL=http://localhost:9090 python tools/api-smoke.py
 
 - 新增或修改功能时，同步更新本 README 的「功能」「REST 接口」「实现要点与限制」和「测试」；接口或行为变了但 README 没跟上，视为未完成。
 - 破坏性操作、匹配规则、默认上限这类会影响使用预期的改动，必须写进「实现要点与限制」。
-
-## 发布产物
-
-`git push origin main` 即发版，流水线产出三样东西：
-
-| 产物 | 用途 |
-| --- | --- |
-| `kudu-console.jar` + `.sha256` | 直接 `java -jar`，或给 `deploy/upgrade.sh` 在线升级 |
-| `ghcr.io/999bug/kudu-console:<tag>` 与 `:latest` | Docker 部署与更新 |
-| `kudu-console-image-<tag>.tar.gz` | 完全离线时 `docker load` |
-
-版本号自动递增 `v1.0.<run_number>`。要指定版本就 `git tag v1.0.5 && git push origin v1.0.5`，或 Actions 手动触发。Release 只保留最近 20 个，tag 全部保留。
-
-为什么不能部署到 GitHub Pages：这是 JVM 进程 + Kudu 客户端，静态托管跑不了 Java，也连不到内网集群。
-
-内网直连、Cloudflare Tunnel、公网反代 + Basic Auth、离线部署与故障排查见 **[DEPLOY.md](DEPLOY.md)**；阿里云 ACR 同步与国内服务器拉取见 **[ALIYUN-ACR.md](ALIYUN-ACR.md)**。
+- 部署方式的变化同步维护 DEPLOY.md / ALIYUN-ACR.md，README 只保留 Docker 一键部署。

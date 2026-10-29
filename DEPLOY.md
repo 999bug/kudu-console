@@ -126,6 +126,41 @@ sudo systemctl reload caddy
 
 ---
 
+## 从源码构建（开发 / 没有现成镜像时）
+
+环境要求：JDK 17；仅构建时需要 Maven 3.6+、Node.js 18+。
+
+### Windows
+
+```bat
+:: 直接启动（默认 8088；target\kudu-console.jar 已构建时无需 Maven/Node，缺失时自动调 build.bat）
+start.bat
+start.bat 9090
+
+:: 重新构建（前端 npm build + mvn package）
+build.bat
+```
+
+### Linux / macOS
+
+```bash
+chmod +x start.sh build.sh
+./start.sh          # 默认 8088
+./start.sh 9090
+./build.sh
+```
+
+### Docker 源码构建
+
+```bash
+cp .env.example .env
+docker compose up -d --build     # 首次 3~8 分钟，主要在拉 Maven 依赖
+```
+
+升级把新 jar 放进 `release/` 再重启，或运行 `./deploy/upgrade.sh`（自动校验 + 失败回滚）。`release/` 为空时容器用镜像内置的 jar 启动。
+
+---
+
 ## 目标机器上不了外网 / 访问不了 GitHub
 
 **不要在目标机器上 clone 源码构建**——那台机器既要装 JDK + Node + Maven，拉 Maven 依赖时照样会卡在网络上。正确做法是在有网的机器上拿构建好的产物，只把产物传过去。
@@ -158,7 +193,7 @@ java -jar kudu-console.jar --server.port=8088 \
 
 ### B. 能连 ghcr.io：直接拉镜像
 
-镜像由 `.github/workflows/docker-image.yml` 在打 tag 时自动构建推送，内含 JRE、前端页面和全部依赖。
+镜像由 `.github/workflows/release.yml` 在发版时自动构建推送，内含 JRE、前端页面和全部依赖。
 
 ```bash
 docker run -d --name kudu-console \
@@ -224,13 +259,19 @@ git clone /tmp/kudu-crud.bundle kudu-crud
 
 ### 发版
 
-**push main 就发版**，不需要手动打 tag：
+**push 到 main 只会跑测试，不会自动发版。** 需要出新镜像时二选一：
+
+**方式一：Actions 手动触发**（推荐，版本号自动递增）
+
+GitHub 仓库 → Actions → 左侧 Release → 右上 Run workflow → 分支选 `main` → 版本号留空（自动 `v1.0.<run_number>`）或手填 → Run。
+
+**方式二：打 tag**
 
 ```bash
-git push origin main
+git tag v1.0.5 && git push origin v1.0.5
 ```
 
-`Release` 流水线会依次做完：跑测试 → 构建前端 → 打包 jar → 构建容器镜像 → 推送 ghcr.io → 自动打版本 tag（`v1.0.<run_number>`）→ 发布 Release。
+`Release` 流水线会依次做完：跑测试 → 构建前端 → 打包 jar → 构建容器镜像 → 推送 ghcr.io → 推版本 tag → 发布 Release（配置了 ACR Secrets 时还会同步到阿里云，详见 ALIYUN-ACR.md）。
 
 产物：
 
@@ -239,8 +280,6 @@ git push origin main
 | `kudu-console.jar` + `.sha256` | 直接 `java -jar`，或给 `upgrade.sh` 在线升级 |
 | `ghcr.io/999bug/kudu-console:<tag>` 与 `:latest` | Docker 部署与升级 |
 | `kudu-console-image-<tag>.tar.gz` | 完全离线时 `docker load` |
-
-要指定版本号，就在本地打 tag 推上去（`git tag v1.0.5 && git push origin v1.0.5`），或 Actions → Release → Run workflow 手填。
 
 Release 只保留最近 20 个，更早的自动清理，tag 全部保留。
 
@@ -291,9 +330,9 @@ cp .env.example .env && vi .env
 docker compose -f docker-compose.prod.yml up -d
 ```
 
-**以后更新代码只有两步：**
+**以后更新代码分两步：**
 
-1. 推代码（流水线自动测试、构建、打 tag、发布）：
+1. 推代码（CI 自动跑测试，**不发版**）；要出新镜像按上面「发版」手动触发或打 tag：
 
 ```bash
 git add <改动文件> && git commit -m "说明"
@@ -311,13 +350,13 @@ docker compose -f docker-compose.prod.yml up -d
 **想彻底不用管，交给 cron 全自动**（每 5 分钟检查一次，有新镜像就换）：
 
 ```cron
-*/5 * * * * cd /opt/kudu-console && docker compose -f docker-compose.prod.yml pull -q && docker compose -f docker-compose.prod.yml up -d >> logs/auto-update.log 2>&1
+*/5 * * * * cd /opt/kudu-console && docker compose -f docker-compose.prod.yml pull -q && docker compose -f docker-compose.prod.yml up -d >> data/logs/auto-update.log 2>&1
 ```
 
 注意：cron 方案必须用 `:latest`，固定版本号不会被动更新。如果新版本起不来，容器会反复重启——所以更稳的做法是 cron 只做 `pull`，`up -d` 留给你确认后手动执行：
 
 ```cron
-*/5 * * * * cd /opt/kudu-console && docker compose -f docker-compose.prod.yml pull -q >> logs/auto-pull.log 2>&1
+*/5 * * * * cd /opt/kudu-console && docker compose -f docker-compose.prod.yml pull -q >> data/logs/auto-pull.log 2>&1
 ```
 
 `up -d` 发现镜像 digest 变了会自动重建容器；`data/config`、`data/logs` 是挂载卷，配置和日志不会丢。全程不碰源码，也不需要 JDK / Maven / Node。

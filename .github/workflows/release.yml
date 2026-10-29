@@ -1,9 +1,9 @@
-# 发布流水线：push main = 自动打 tag + 构建 jar + 构建镜像 + 出 Release
+# 发布流水线：手动触发或打 tag 时构建 jar + 镜像 + 出 Release
 #
 # 触发：
-#   push 到 main        → 自动版本 v1.0.<run_number>，打 tag 并发布
-#   push tag v*         → 用该 tag 发布（手动指定版本的场景）
-#   workflow_dispatch   → 可手填版本号
+#   workflow_dispatch   → 在 Actions 页手动 Run workflow（版本号可填，留空自动 v1.0.<run_number>）
+#   push tag v*         → 用该 tag 发布
+#   push 到 main 不发版，只由 CI（ci.yml）跑测试
 #
 # 产物：
 #   kudu-console.jar / .sha256                      直接 java -jar 或 upgrade.sh
@@ -15,7 +15,6 @@ name: Release
 
 on:
   push:
-    branches: [main]
     tags: ['v*']
   workflow_dispatch:
     inputs:
@@ -170,7 +169,7 @@ jobs:
           docker push "$DST:latest"
           echo "已同步到 $DST:$V"
 
-      # push 分支时补一个 tag，回滚时能按版本号 checkout；
+      # workflow_dispatch 属于分支触发，补一个版本 tag，回滚时能按版本号 checkout；
       # GITHUB_TOKEN 推的 tag 不会再触发 workflow，不会递归
       - name: Push tag
         if: github.ref_type == 'branch'
