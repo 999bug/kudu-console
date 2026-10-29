@@ -71,6 +71,7 @@ export const api = {
   activateCluster: (id) => request('POST', `/api/clusters/${id}/activate`),
   testCluster: (masters) => request('POST', '/api/clusters/test', { body: { masters } }),
   limits: () => request('GET', '/api/meta/limits'),
+  version: () => request('GET', '/api/meta/version'),
 
   clusterStatus: () => request('GET', '/api/cluster/status'),
   listTables: () => request('GET', '/api/tables'),

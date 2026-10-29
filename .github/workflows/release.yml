@@ -53,6 +53,8 @@ jobs:
             V="v1.0.${GITHUB_RUN_NUMBER}"
           fi
           echo "value=$V" >> "$GITHUB_OUTPUT"
+          echo "commit=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+          echo "build_time=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
           echo "本次版本: $V"
 
       - name: Setup Node
@@ -108,6 +110,11 @@ jobs:
           tags: |
             ghcr.io/${{ github.repository_owner }}/kudu-console:${{ steps.ver.outputs.value }}
             ghcr.io/${{ github.repository_owner }}/kudu-console:latest
+          build-args: |
+            APP_VERSION=${{ steps.ver.outputs.value }}
+            GIT_COMMIT=${{ steps.ver.outputs.commit }}
+            BUILD_TIME=${{ steps.ver.outputs.build_time }}
+            APP_IMAGE=ghcr.io/${{ github.repository_owner }}/kudu-console:${{ steps.ver.outputs.value }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 

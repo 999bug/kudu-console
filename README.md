@@ -11,6 +11,7 @@
 | 模块 | 能力 |
 | --- | --- |
 | 平台管理 | 添加 / 编辑 / 删除 / 测试连接 / 切换当前平台；每个平台可单独设置 master 地址、超时、Web UI 开关与端口偏移 |
+| 版本信息 | 顶栏显示应用版本与 git commit，悬停可看构建时间和镜像；`GET /api/meta/version` 也可查，升级后能直接确认服务器实际版本 |
 | 集群状态 | master 列表（角色 LEADER/FOLLOWER、RPC/HTTP 地址、启动时间、版本）、tablet server 存活与心跳、clusterId、表数量；Web UI 不可达时自动降级为 RPC 侧信息 |
 | 表清单 | 按库分组（Kudu 无 catalog，`db` 取自表名前缀）、搜索、行数与磁盘占用（master 统计估算）、impala 托管表标记 |
 | 表结构 | 列名/类型/主键/可空/precision/scale/length/编码/压缩/默认值/注释、副本数、hash 与 range 分区、分区边界 |
@@ -99,15 +100,24 @@ docker compose -f docker-compose.prod.yml up -d
 
 `up -d` 发现镜像变了会自动重建容器，`data/` 里的配置和日志不受影响。
 
+**3. 确认版本**（服务器）
+
+```bash
+curl -s http://127.0.0.1:8088/api/meta/version
+docker inspect kudu-console --format '{{.Config.Image}}'
+```
+
+接口返回 `version / commit / buildTime / image`；页面顶栏也会显示 `v1.0.x · commit`，悬停可看构建时间与镜像。用 `latest` 时，cron 拉到新镜像后顶栏版本号会跟着变。
+
 **是增量下载**：镜像按 Spring Boot 分层构建，依赖（35MB）和业务代码（约 1MB）是不同的层。只改业务代码时，`pull` 只下 1MB 左右，不会重传依赖。只有改 `pom.xml` 或基础镜像才会动到大层。
 
 想彻底不用管，挂个 cron 每 5 分钟检查一次：
 
 ```cron
-*/5 * * * * cd /opt/kudu-console && docker compose -f docker-compose.prod.yml pull -q && docker compose -f docker-compose.prod.yml up -d >> logs/auto-update.log 2>&1
+*/5 * * * * cd /opt/kudu-console && docker compose -f docker-compose.prod.yml pull -q && docker compose -f docker-compose.prod.yml up -d >> data/logs/auto-update.log 2>&1
 ```
 
-> cron 全自动必须用 `IMAGE=...:latest`，固定版本号不会被动更新。
+> cron 全自动必须用 `IMAGE=...:latest`，固定版本号不会被动更新。升级是否生效可以看页面顶栏的版本号，或 `curl -s http://127.0.0.1:8088/api/meta/version`。
 
 #### 三、回滚
 
@@ -358,6 +368,7 @@ kudu-console/
 | POST | `/api/clusters/test` | 用候选地址试连（不落库） |
 | GET | `/api/cluster/status` | 当前平台的集群总览 |
 | GET | `/api/meta/limits` | 全局查询限制 |
+| GET | `/api/meta/version` | 应用版本、git commit、构建时间、镜像名 |
 | GET | `/api/tables` | 按库分组的表清单 |
 | GET | `/api/table?table=` | 表结构详情 |
 | POST | `/api/table/query?table=` | 条件查询 + 分页 |
@@ -395,6 +406,7 @@ kudu-console/
 ## 实现要点与限制
 
 - **多平台隔离**：每个平台一个 `ClusterRuntime`（独立 KuduClient、表缓存、Web UI 统计缓存），配置存 `config/clusters.json`；某个平台连不上只影响它自己。平台按需懒建连，不会在启动时把所有集群都连一遍。
+- **版本信息来自构建参数**：镜像构建时把 `APP_VERSION` / `GIT_COMMIT` / `BUILD_TIME` / `APP_IMAGE` 写进环境变量与 OCI label；`/api/meta/version` 和顶栏读取同一份数据。本地 `java -jar` 没有这些变量时回落到 pom 版本（`source=pom`）。
 - **删库是批量的，不是原子的**：按前缀逐个 `deleteTable`，中途失败会继续删剩下的表，最终在任务结果里列出成功的张数与失败原因；删库前会拒绝执行，如果该库下有表正跑着 truncate。Impala 托管表也能删，但删完要在 Impala 里 `INVALIDATE METADATA`。
 - **按前缀删表匹配完整表名**：忽略大小写，同时比对剥离 `impala::` 后的名字（前缀 `db.` 能命中 `db.t1` 与 `impala::db.t2`）；前缀按字面量处理，`*` / `%` 不做通配；`sys.*` / `kudu.*` 系统表永不删除，预览里只报告跳过数量。与运行中的单表、删库或相交前缀任务冲突时拒绝提交。
 - **测试调度是「造变更」不是备份**：删除随机主键行、按 schema 生成新行（整型主键取扫描最大值+1，字符串主键带运行种子，复合主键逐列递增），修改表结构只支持加可空列（Kudu 不能改列类型）。`REPLACE` 模式会先删上一轮自动加的 `bk_test_` 列再加新列，避免列无限增长；手动重复执行也记住上一轮的列。
@@ -412,7 +424,7 @@ kudu-console/
 ## 测试
 
 ```bash
-mvn test          # 单元测试：类型转换、表名解析、前缀匹配、任务冲突、测试数据生成、表比对签名、DDL 校验
+mvn test          # 单元测试：类型转换、表名解析、前缀匹配、任务冲突、测试数据生成、表比对签名、版本信息、DDL 校验
 ```
 
 接口冒烟（会对集群建临时表再删掉，需要控制台已启动）：

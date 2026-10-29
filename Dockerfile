@@ -25,6 +25,22 @@ RUN java -Djarmode=layertools -jar app.jar extract \
  && mkdir -p dependencies spring-boot-loader snapshot-dependencies application
 
 FROM eclipse-temurin:17-jre
+# 构建信息由 CI 通过 build-args 注入；本地 docker build 不传时落到默认值
+ARG APP_VERSION=dev
+ARG GIT_COMMIT=unknown
+ARG BUILD_TIME=unknown
+ARG APP_IMAGE=unknown
+LABEL org.opencontainers.image.title="kudu-console" \
+      org.opencontainers.image.description="Kudu console" \
+      org.opencontainers.image.version="${APP_VERSION}" \
+      org.opencontainers.image.revision="${GIT_COMMIT}" \
+      org.opencontainers.image.created="${BUILD_TIME}" \
+      org.opencontainers.image.source="https://github.com/999bug/kudu-crud" \
+      org.opencontainers.image.ref.name="${APP_IMAGE}"
+ENV APP_VERSION=${APP_VERSION} \
+    GIT_COMMIT=${GIT_COMMIT} \
+    BUILD_TIME=${BUILD_TIME} \
+    APP_IMAGE=${APP_IMAGE}
 WORKDIR /app
 # curl 供 healthcheck 和排障使用
 RUN apt-get update \

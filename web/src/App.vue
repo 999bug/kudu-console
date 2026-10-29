@@ -1,6 +1,7 @@
 <script setup>
-import { computed, onMounted, onUnmounted } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { api } from './api'
 import {
   store, toasts, removeToast, refreshCluster, loadClusters, switchCluster,
   toast, activeCluster
@@ -19,6 +20,23 @@ const navItems = [
 ]
 
 const current = computed(() => activeCluster())
+const versionInfo = ref(null)
+const versionLabel = computed(() => {
+  const info = versionInfo.value
+  if (!info?.version || info.version === 'unknown') return ''
+  const version = /^\d/.test(info.version) ? 'v' + info.version : info.version
+  return info.commit ? `${version} · ${info.commit}` : version
+})
+const versionTitle = computed(() => {
+  const info = versionInfo.value
+  if (!info) return ''
+  return [
+    '应用版本 ' + info.version,
+    info.commit ? 'commit ' + info.commit : null,
+    info.buildTime ? '构建 ' + info.buildTime : null,
+    info.image ? '镜像 ' + info.image : null
+  ].filter(Boolean).join(' · ')
+})
 const connected = computed(() => store.cluster?.connected === true)
 const dotClass = computed(() => {
   if (!store.activeId) return ''
@@ -58,6 +76,11 @@ async function onSwitch(event) {
 
 let timer = null
 onMounted(async () => {
+  api.version().then((data) => {
+    versionInfo.value = data
+  }).catch(() => {
+    // 版本接口不可用时不影响页面
+  })
   try {
     await loadClusters()
   } catch (e) {
@@ -115,12 +138,13 @@ onUnmounted(() => {
 
     <div class="main">
       <header class="topbar">
-        <div>
+        <div class="topbar-heading">
           <div class="topbar-title">{{ pageTitle }}</div>
           <div class="topbar-sub" v-if="subtitle">{{ subtitle }}</div>
         </div>
         <div class="topbar-right">
-          <span class="tag plain" v-if="store.cluster?.kuduVersion">{{ store.cluster.kuduVersion }}</span>
+          <span class="tag plain topbar-version" v-if="versionLabel" :title="versionTitle">{{ versionLabel }}</span>
+          <span class="tag plain topbar-kudu" v-if="store.cluster?.kuduVersion">{{ store.cluster.kuduVersion }}</span>
           <button class="btn sm" @click="refreshCluster" :disabled="store.loading || !store.activeId">
             <span v-if="store.loading" class="spinner"></span>刷新状态
           </button>
