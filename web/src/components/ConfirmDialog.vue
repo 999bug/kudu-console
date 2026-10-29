@@ -25,7 +25,10 @@ const canConfirm = computed(() => {
   <Dialog :title="title" @close="emit('close')">
     <p style="margin: 0 0 12px; color: var(--text-2)">{{ message }}</p>
     <div v-if="expect" class="field">
-      <label class="label">请输入 <code class="mono">{{ expect }}</code> 以确认</label>
+      <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px">
+        <label class="label">请输入 <code class="mono">{{ expect }}</code> 以确认</label>
+        <button class="btn ghost sm" :disabled="busy" @click="typed = expect">一键填入</button>
+      </div>
       <input v-model="typed" class="input mono" :placeholder="expect" spellcheck="false" />
     </div>
     <template #foot>

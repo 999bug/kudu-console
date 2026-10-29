@@ -98,7 +98,10 @@ onUnmounted(() => {
     </template>
 
     <div v-if="preview && preview.count" class="field" style="margin-top: 14px">
-      <label class="label">请输入 <code class="mono">{{ preview.prefix }}</code> 以确认</label>
+      <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px">
+        <label class="label">请输入 <code class="mono">{{ preview.prefix }}</code> 以确认</label>
+        <button class="btn ghost sm" :disabled="submitting" @click="typed = preview.prefix">一键填入</button>
+      </div>
       <input v-model="typed" class="input mono" :placeholder="preview.prefix" spellcheck="false" />
     </div>
 
