@@ -138,24 +138,27 @@ jobs:
           ls -lh "kudu-console-image-$V.tar.gz"
 
       # 可选：同步一份到国内镜像仓库（阿里云 ACR / 腾讯云 TCR / 华为云 SWR 都兼容）。
-      # 没配 secrets 就跳过，不影响 ghcr 这条主链路。
+      # 没配 secrets 就跳过；同步失败不阻塞发版（tag / Release 照常产出），日志里会有具体原因。
       # 需要的 secrets：ACR_REGISTRY / ACR_NAMESPACE / ACR_USERNAME / ACR_PASSWORD
       - name: Mirror to domestic registry
+        continue-on-error: true
         env:
           ACR_REGISTRY: ${{ secrets.ACR_REGISTRY }}
           ACR_NAMESPACE: ${{ secrets.ACR_NAMESPACE }}
           ACR_USERNAME: ${{ secrets.ACR_USERNAME }}
           ACR_PASSWORD: ${{ secrets.ACR_PASSWORD }}
         run: |
-          if [ -z "$ACR_PASSWORD" ] || [ -z "$ACR_REGISTRY" ]; then
+          if [ -z "$ACR_PASSWORD" ] || [ -z "$ACR_REGISTRY" ] || [ -z "$ACR_NAMESPACE" ] || [ -z "$ACR_USERNAME" ]; then
             echo "未配置 ACR_* secrets，跳过国内镜像同步"
             exit 0
           fi
           V="${{ steps.ver.outputs.value }}"
           SRC="ghcr.io/${{ github.repository_owner }}/kudu-console:$V"
           DST="$ACR_REGISTRY/$ACR_NAMESPACE/kudu-console"
-          echo "$ACR_PASSWORD" | docker login "$ACR_REGISTRY" \
-            --username "$ACR_USERNAME" --password-stdin
+          if ! echo "$ACR_PASSWORD" | docker login "$ACR_REGISTRY" --username "$ACR_USERNAME" --password-stdin; then
+            echo "::warning::ACR 登录失败，跳过同步。常见原因：固定密码未开启 / 用户名不是账号全名 / RAM 用户未授权 / registry 地址带了 https://"
+            exit 0
+          fi
           docker tag "$SRC" "$DST:$V"
           docker tag "$SRC" "$DST:latest"
           docker push "$DST:$V"

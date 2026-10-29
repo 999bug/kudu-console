@@ -162,32 +162,34 @@ docker compose -f docker-compose.prod.yml --profile tunnel up -d
 
 ghcr.io 在国外，首次拉 139MB 会慢。可以同步一份到国内的容器仓库，之后从国内拉。以阿里云 ACR 为例（个人版免费）：
 
-1. 阿里云控制台 → 容器镜像服务 → 开通个人版 → 创建命名空间（如 `kuducrud`）
-2. 该命名空间 → 访问凭证 → 设置**固定密码**（不是临时 token，不会过期）
+1. 阿里云控制台 → 容器镜像服务 → 开通个人版 → 创建命名空间（如 `kuducrud`），并在该命名空间下建好仓库 `kudu-console`（或开启 push 自动建仓）
+2. 该实例 → 访问凭证 → 设置**固定密码**（不是临时 token，不会过期）
 3. GitHub 仓库 → Settings → Secrets and variables → Actions，添加四个：
 
-| Secret 名称 | 值 |
+| Secret 名称 | 值（以新版个人实例为例） |
 | --- | --- |
-| `ACR_REGISTRY` | `registry.cn-hangzhou.aliyuncs.com`（按你选的地域） |
+| `ACR_REGISTRY` | **必须和服务器 `docker login` 的域名完全一致**，如 `crpi-jzu3y0vlo2kdv4a1.cn-shanghai.personal.cr.aliyuncs.com`（旧版个人版则是 `registry.cn-hangzhou.aliyuncs.com`） |
 | `ACR_NAMESPACE` | 命名空间，如 `kuducrud` |
-| `ACR_USERNAME` | 阿里云账号全名或 RAM 用户名 |
+| `ACR_USERNAME` | 访问凭证页的用户名，如 `996icu007` |
 | `ACR_PASSWORD` | 第 2 步设置的固定密码 |
 
-配好后下次 push 会自动同步一份过去，Actions 日志里能看到 `已同步到 ...`。没配就自动跳过，不影响 ghcr 主链路。
+配好后下次 push 会自动同步一份过去，Actions 日志里能看到 `已同步到 ...`。没配就自动跳过；**同步失败不会阻塞发版**（tag 和 Release 照常产出），日志里会给出具体原因，修好 secrets 后在 Actions 里对该次运行点 `Re-run failed jobs` 即可补同步。
 
-服务器上换成国内地址：
+服务器上换成国内地址（域名要和 `docker login` 的一致）：
 
 ```bash
-docker login registry.cn-hangzhou.aliyuncs.com
+docker login crpi-jzu3y0vlo2kdv4a1.cn-shanghai.personal.cr.aliyuncs.com --username=996icu007
 ```
 
 ```env
-IMAGE=registry.cn-hangzhou.aliyuncs.com/kuducrud/kudu-console:v1.0.4
+IMAGE=crpi-jzu3y0vlo2kdv4a1.cn-shanghai.personal.cr.aliyuncs.com/kuducrud/kudu-console:latest
 ```
+
+登录报 403 常见原因：`ACR_REGISTRY` 带 `https://` 或与登录域名不一致、用户名不是访问凭证页显示的那个、固定密码没开启（用了登录密码或临时 token）、RAM 用户未被授权。
 
 腾讯云 TCR（`ccr.ccs.tencentyun.com`）、华为云 SWR 用的是同一套 Docker Registry 协议，把 `ACR_REGISTRY` 换成对应域名即可。
 
-> 阿里云个人版仓库默认私有，服务器需要 `docker login` 一次；固定密码不会过期。
+> 仓库默认私有，服务器需要 `docker login` 一次；固定密码不会过期。
 
 #### 七、首次拉取太慢 / 完全断网
 
