@@ -259,7 +259,7 @@ chmod +x start.sh build.sh
 - 仅构建时需要：Maven 3.6+、Node.js 18+
 - 仅 Docker 方式：Docker 20.10+ 与 Compose v2，无需上面三项
 
-运行日志写在 `logs/kudu-console.log`；平台清单写在 `config/clusters.json`（两者都不入库）。
+运行日志写在 `logs/kudu-console.log`；平台清单写在 `config/clusters.json`，定时任务写在 `config/test-schedules.json`（都不入库）。
 
 ## 多平台
 
@@ -268,6 +268,18 @@ chmod +x start.sh build.sh
 - 切换平台后，前端会给每个请求带上 `X-Kudu-Cluster: <平台id>`，后端按 id 路由到对应连接；不带该头时用服务端激活的平台（可用 `POST /api/clusters/{id}/activate` 切换）。
 - 每个平台独立持有 KuduClient 与表缓存：连不上只影响该平台（返回 `KUDU_UNAVAILABLE`），其它平台照常。
 - 旧的单平台配置 `config/connection.json` 会在首次启动时自动迁移成一个平台。
+
+## 备份恢复验证
+
+「测试调度」和「表比对」是配套用的，用来验证全量 / 增量备份与恢复是否真的把数据带回来了：
+
+1. 对源表做一次全量备份，记下备份时间点。
+2. 在「测试调度」勾选源表，选择「删除数据 / 修改表结构 / 添加数据」，立即执行一次，或设一个覆盖备份窗口的定时任务（可设间隔、最多次数、结束时间）。
+3. 执行增量备份，让备份工具捕获这些变更。
+4. 在目标端恢复后，打开「表比对」：左侧选源平台 + 源表，右侧选恢复后的平台 + 表，开始比对。
+5. 结果里会分别给出表结构差异、目标缺失 / 目标多出 / 内容不一致的行数与样本；样本包含主键和整行可读内容，可直接定位恢复问题。
+
+注意：比对本身只读，但会把源表整表载入内存（默认上限 20 万行），比对期间应停止写入，否则结果可能自相矛盾。
 
 ## 配置
 
@@ -318,10 +330,11 @@ kudu-console/
 │  └─ src/{views,components,api.js,format.js,store.js,styles.css}
 └─ src/main/
    ├─ java/com/kuducrud/
-   │  ├─ kudu/                 连接管理、类型转换、谓词、分区、写入模板
-   │  ├─ service/              表清单/结构/行读写/DDL/集群状态
+   │  ├─ config/               平台与定时任务配置持久化、每平台运行时装配
+   │  ├─ kudu/                 连接管理、类型转换、谓词、分区、写入模板、测试行生成
+   │  ├─ service/              表清单/结构/行读写/DDL/测试动作/调度/表比对/集群状态
    │  ├─ service/webui/        master Web UI 解析（/masters、/tablet-servers、/metrics?raw）
-   │  ├─ job/                  异步任务（truncate）
+   │  ├─ job/                  异步任务（清空 / 删库 / 按前缀删表 / 测试调度）
    │  ├─ model/                DTO（record）
    │  └─ web/                  REST 控制器与统一异常
    └─ resources/
@@ -331,7 +344,7 @@ kudu-console/
 
 ## REST 接口
 
-所有涉及具体表的接口都用查询参数 `?table=<完整表名>`（表名含 `.`、`impala::`，不放路径）。
+表级 DDL 与行读写接口用 `?table=<完整表名>`；批量操作、测试动作与表比对的目标表放在 body 里。
 
 平台选择：请求头 `X-Kudu-Cluster: <平台id>`（或 `?cluster=<id>`）；不带则用服务端激活的平台。
 
@@ -367,6 +380,7 @@ kudu-console/
 | GET | `/api/compare/{id}` | 比对进度与结果 |
 | POST | `/api/compare/{id}/cancel` | 取消比对 |
 | GET | `/api/compare/tables?cluster=` | 指定平台的表清单（供左右两侧选择） |
+| GET | `/api/compare/meta` | 比对行数与样本数限制 |
 | GET | `/api/jobs`、`/api/jobs/{id}` | 任务列表/详情（带平台 id） |
 | POST | `/api/jobs/{id}/cancel` | 取消任务 |
 
@@ -376,7 +390,7 @@ kudu-console/
 { "code": "VALIDATION_FAILED", "message": "…", "details": { "fields": [ … ] } }
 ```
 
-`code` 取值：`KUDU_UNAVAILABLE`、`KUDU_TIMEOUT`、`TABLE_NOT_FOUND`、`TABLE_EXISTS`、`VALIDATION_FAILED`、`UNSUPPORTED`、`CONFIRM_REQUIRED`、`JOB_CONFLICT`、`INTERNAL`。
+`code` 取值：`KUDU_UNAVAILABLE`、`KUDU_TIMEOUT`、`TABLE_NOT_FOUND`、`TABLE_EXISTS`、`VALIDATION_FAILED`、`UNSUPPORTED`、`CONFIRM_REQUIRED`、`JOB_CONFLICT`、`CLUSTER_NOT_FOUND`、`SCHEDULE_NOT_FOUND`、`COMPARE_NOT_FOUND`、`INTERNAL`。
 
 ## 实现要点与限制
 
@@ -408,6 +422,11 @@ python tools/api-smoke.py
 KUDU_CLUSTER=c17eeff58 python tools/api-smoke.py     # 指定平台
 KUDU_CONSOLE_URL=http://localhost:9090 python tools/api-smoke.py
 ```
+
+## 维护约定
+
+- 新增或修改功能时，同步更新本 README 的「功能」「REST 接口」「实现要点与限制」和「测试」；接口或行为变了但 README 没跟上，视为未完成。
+- 破坏性操作、匹配规则、默认上限这类会影响使用预期的改动，必须写进「实现要点与限制」。
 
 ## 发布产物
 
