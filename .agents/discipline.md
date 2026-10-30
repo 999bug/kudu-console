@@ -30,6 +30,7 @@
 - **【红线】`git add` 只加具体路径**，不用 `-A` / `.`。
 - **【默认】提交前看一眼 `git status`**，确认没有 `.env`、配置、日志、构建产物混进来。
 - **【默认】多行 message 用 `git commit -F <file>`**，不要拼多个 `-m`，也不要依赖交互式编辑器（AI / CI 环境会卡住）。
+- **【默认】提交后刷新代码索引**：仓库有 `.codegraph/` 时执行 `codegraph sync`，索引落后会让后续的结构查询读到旧代码。仓库已配 `.githooks/post-commit`（`git config core.hooksPath .githooks`）就依赖它，没有就自己跑一次；同步失败只提示，不影响提交结果。
 - **【红线】不写 AI 署名**（`Generated with ...`、`Co-authored-by: AI`）。
 - **【建议】一个改动一个提交**，不攒到最后一次性提一团。
 
