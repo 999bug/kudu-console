@@ -66,11 +66,20 @@ internal_endpoints:
   allowed_in_docs: false          # 待确认：README / DEPLOY / .env.example 仍有 192.168.46.23 示例地址
 ```
 
-## 6. 验证方式
+## 6. 作用域与验证
 
 ```yaml
+ai_scope:                         # AI 只看 / 只改这些目录
+  - src/main/java
+  - src/test/java
+  - web/src
+  - tools
+  - README.md / DEVELOPMENT.md / AGENTS.md / .agents
+  # 排除：target、src/main/resources/static（构建产物）、web/node_modules、logs、config
+log_language: en                  # 现有 48 条日志均为英文，保持
 verify_build: ./build.sh
 verify_test: mvn -B test
+verify_test_policy: full
 verify_smoke: KUDU_CONSOLE_URL=http://localhost:9099 python tools/api-smoke.py
 verify_version: curl -s http://localhost:9099/api/meta/version
 verify_ui: Playwright + 本机 Chromium，1440 / 820 / 700 三档截图

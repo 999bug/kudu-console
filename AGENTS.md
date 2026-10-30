@@ -33,27 +33,28 @@
 
 不要凭猜测加载模块。先看仓库里有什么：
 
-| 看到什么 | 结论 | 加载 |
-| --- | --- | --- |
-| `pom.xml` / `build.gradle` | Java 项目；JDK 版本看 `java.version` / toolchain，不看习惯 | `lang-java.md` |
-| `pyproject.toml` / `requirements.txt` / `setup.py` | Python；解释器与依赖管理看文件本身 | `lang-python.md` |
-| `package.json` + `vue` 依赖 / `vite.config.*` | Vue 前端 | `lang-vue.md` |
-| `Dockerfile` / `docker-compose*.yml` | 容器交付 | `release-docker.md` |
-| `.github/workflows/*.yml` | 已有流水线，**先读再改**，不要另起一套 | `release-github.md` |
-| `.env.example` / `config/*.json` / `secrets` | 有运行时配置，先确认哪些不入库 | `discipline.md` |
-| `.agents/project-profile.md` 的 `related_docs` | 项目自有文档（部署、流程、决策记录） | 先读，优先级高于通用建议 |
+| 看到什么                                               | 结论                                              | 加载                  |
+| -------------------------------------------------- | ----------------------------------------------- | ------------------- |
+| `pom.xml` / `build.gradle`                         | Java 项目；JDK 版本看 `java.version` / toolchain，不看习惯 | `lang-java.md`      |
+| `pyproject.toml` / `requirements.txt` / `setup.py` | Python；解释器与依赖管理看文件本身                            | `lang-python.md`    |
+| `package.json` + `vue` 依赖 / `vite.config.*`        | Vue 前端                                          | `lang-vue.md`       |
+| `Dockerfile` / `docker-compose*.yml`               | 容器交付                                            | `release-docker.md` |
+| `.github/workflows/*.yml`                          | 已有流水线，**先读再改**，不要另起一套                           | `release-github.md` |
+| `.env.example` / `config/*.json` / `secrets`       | 有运行时配置，先确认哪些不入库                                 | `discipline.md`     |
+| `.agents/project-profile.md` 的 `related_docs`      | 项目自有文档（部署、流程、决策记录）                              | 先读，优先级高于通用建议        |
 
 ## 3. 分流表：任务 → 必读模块
 
-| 你在做什么 | 必读 |
-| --- | --- |
-| 首次进入项目、准备改代码 | `project-profile.md` + 第 2 节探测出的模块 |
-| 新增/修改 Java、Python、Vue 代码 | 对应 `lang-*.md` |
-| **写 commit message、定分支、合并 MR** | `commit.md` |
-| 准备发版、改 tag/Release/Pages/workflow | `release-github.md` + `commit.md` |
-| 改 Dockerfile、compose、镜像源、部署方式 | `release-docker.md` |
-| 碰凭据、日志、示例数据、提交历史 | `discipline.md` |
-| 收尾（提交、清理、交付说明） | `discipline.md` + `commit.md` |
+| 你在做什么                             | 必读                                 |
+| --------------------------------- | ---------------------------------- |
+| 首次进入项目、准备改代码                      | `project-profile.md` + 第 2 节探测出的模块 |
+| 新增/修改 Java、Python、Vue 代码          | 对应 `lang-*.md`                     |
+| **对接外部系统、调第三方 SDK、处理 HTTP 响应**   | `integration.md`                   |
+| **写 commit message、定分支、合并 MR**    | `commit.md`                        |
+| 准备发版、改 tag/Release/Pages/workflow | `release-github.md` + `commit.md`  |
+| 改 Dockerfile、compose、镜像源、部署方式     | `release-docker.md`                |
+| 碰凭据、日志、示例数据、提交历史                  | `discipline.md`                    |
+| 收尾（提交、清理、交付说明）                    | `discipline.md` + `commit.md`      |
 
 ## 4. 跨语言硬红线
 
@@ -68,7 +69,14 @@
 9. **【红线】破坏性操作必须二次确认**：删表、删库、清空、批量改、覆盖线上文件。命令能预览就先预览。
 10. **【红线】生产数据只读优先**：需要写时先备份、先小范围、先确认回滚路径。
 
-## 5. 完成定义（DoD）
+## 5. 文案语言
+
+- **【默认】日志、异常消息、CLI 输出、对外错误信息用英文**。理由：这些内容会被贴进工单、被 grep、被不同语言的同事读。
+- **【默认】代码注释、文档、README、提交信息用中文**。理由：这些是给自己和团队维护时看的，母语效率最高。
+- **【默认】同一处不要中英混杂**：一条日志里不要半句中文半句英文。
+- **【默认】已发布的历史日志不强制改造**，新写的按此执行。
+
+## 6. 完成定义（DoD）
 
 **代码改动**全部满足才算完成：
 
@@ -87,14 +95,14 @@
 
 **前端 / UI 改动**额外要求：实际点击过，并在窄屏与宽屏各截一次图（默认 1440 / 768 两档，或按 profile 指定的断点）。
 
-## 6. 回复与交付
+## 7. 回复与交付
 
 - 中文；先结论后细节；不写"好问题""我这就帮您"这类填充语。
 - 交付说明必须包含三件事：**改了什么文件**、**验证了什么**、**没验证什么**。
 - 长任务给中间结论，不要闷头做到最后才说话；卡住时说明卡在哪、已排除哪些可能。
 - 结论要有出处：文件路径、命令输出、日志行号。不要给"应该是"级别的判断当结论。
 
-## 7. 维护这份规范
+## 8. 维护这份规范
 
 - 每条规则必须能回答"什么时候适用"。写不出触发条件的，删掉。
 - 不写版本号、路径、IP、账号、公司流程细节——这些会腐烂，放进 `project-profile.md`。
