@@ -41,6 +41,7 @@
 | `Dockerfile` / `docker-compose*.yml`               | 容器交付                                            | `release-docker.md` |
 | `.github/workflows/*.yml`                          | 已有流水线，**先读再改**，不要另起一套                           | `release-github.md` |
 | `.env.example` / `config/*.json` / `secrets`       | 有运行时配置，先确认哪些不入库                                 | `discipline.md`     |
+| 单个类 >1000 行 / 核心流程里按实现名分支（`isXxxType`） | 老系统，**不要直接加功能**，先看体检与接缝                        | `legacy.md`         |
 | `.agents/project-profile.md` 的 `related_docs`      | 项目自有文档（部署、流程、决策记录）                              | 先读，优先级高于通用建议        |
 
 ## 3. 分流表：任务 → 必读模块
@@ -49,6 +50,7 @@
 | --------------------------------- | ---------------------------------- |
 | 首次进入项目、准备改代码                      | `project-profile.md` + 第 2 节探测出的模块 |
 | 新增/修改 Java、Python、Vue 代码          | 对应 `lang-*.md`                     |
+| **在老项目里加功能、重构巨型类、迁移分支逻辑** | `legacy.md` |
 | **对接外部系统、调第三方 SDK、处理 HTTP 响应**   | `integration.md`                   |
 | **写 commit message、定分支、合并 MR**    | `commit.md`                        |
 | 准备发版、改 tag/Release/Pages/workflow | `release-github.md` + `commit.md`  |
