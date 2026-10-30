@@ -132,6 +132,7 @@ Release 只保留最近 20 个，tag 全部保留。
 | --- | --- |
 | [DEPLOY.md](DEPLOY.md) | 其他部署方式：jar + systemd、离线镜像包、公网访问（Cloudflare Tunnel）、源码构建、故障排查与上线检查清单 |
 | [ALIYUN-ACR.md](ALIYUN-ACR.md) | 阿里云建仓、GitHub Secrets 配置、服务器拉取、自动更新的完整步骤 |
+| [DEVELOPMENT.md](DEVELOPMENT.md) | 开发与发布规范：项目初始化、提交规范、自测闭环、CI/Release 流水线、GitHub Pages、国内镜像、Git 红线与检查清单 |
 | [tools/api-smoke.py](tools/api-smoke.py) | 接口冒烟脚本（对集群建临时表再删掉） |
 
 ## 多平台
@@ -292,3 +293,4 @@ KUDU_CONSOLE_URL=http://localhost:9090 python tools/api-smoke.py
 - 新增或修改功能时，同步更新本 README 的「功能」「REST 接口」「实现要点与限制」和「测试」；接口或行为变了但 README 没跟上，视为未完成。
 - 破坏性操作、匹配规则、默认上限这类会影响使用预期的改动，必须写进「实现要点与限制」。
 - 部署方式的变化同步维护 DEPLOY.md / ALIYUN-ACR.md，README 只保留 Docker 一键部署。
+- 提交信息、自测闭环、发版动作遵循 [DEVELOPMENT.md](DEVELOPMENT.md)，流程变化先改规范再改流水线。
