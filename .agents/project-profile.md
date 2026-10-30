@@ -24,12 +24,20 @@ test_command: mvn -B test         # 本机无全局 mvn / java，需先设 JAVA_
 dev_command: java -jar target/kudu-console.jar --server.port=9099
 ```
 
-## 3. 提交身份（oss）
+## 3. 提交身份与策略（oss）
 
 ```yaml
 git_user_name: saul
 git_user_email: 57277097+999bug@users.noreply.github.com
 enable_private_email: true
+```
+
+```yaml
+commit_style: conventional        # 历史提交为 feat: / docs: ，不中途换风格
+                                  # 要切公司 [NF]/[BF]/[IM] 风格，改这一行并同步 commit.md 的执行口径
+issue_tracker: GitHub Issues      # 无禅道 / Bugzilla，单号用 Closes #123
+auto_commit: true
+push_policy: on-request           # 提交自动，push 等明确授权
 ```
 
 ## 4. 交付与发布

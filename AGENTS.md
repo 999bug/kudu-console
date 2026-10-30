@@ -49,10 +49,11 @@
 | --- | --- |
 | 首次进入项目、准备改代码 | `project-profile.md` + 第 2 节探测出的模块 |
 | 新增/修改 Java、Python、Vue 代码 | 对应 `lang-*.md` |
-| 准备发版、改 tag/Release/Pages/workflow | `release-github.md` + `discipline.md` |
+| **写 commit message、定分支、合并 MR** | `commit.md` |
+| 准备发版、改 tag/Release/Pages/workflow | `release-github.md` + `commit.md` |
 | 改 Dockerfile、compose、镜像源、部署方式 | `release-docker.md` |
 | 碰凭据、日志、示例数据、提交历史 | `discipline.md` |
-| 收尾（提交、清理、交付说明） | `discipline.md` |
+| 收尾（提交、清理、交付说明） | `discipline.md` + `commit.md` |
 
 ## 4. 跨语言硬红线
 
