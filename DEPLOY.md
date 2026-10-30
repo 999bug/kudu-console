@@ -31,8 +31,8 @@ curl -sv telnet://192.168.46.23:7051   # 能建立连接即可，Ctrl+C 退出
 ### 2. 拉代码
 
 ```bash
-git clone https://github.com/999bug/kudu-crud.git
-cd kudu-crud
+git clone https://github.com/999bug/kudu-console.git
+cd kudu-console
 cp .env.example .env
 vi .env                  # 改 KUDU_MASTERS
 ```
@@ -92,7 +92,7 @@ sudo chown -R kudu:kudu /opt/kudu-console
 # 2. 取最新 jar（也可以用 deploy/upgrade.sh 首次安装）
 cd /opt/kudu-console
 sudo curl -fL -o kudu-console.jar \
-  https://github.com/999bug/kudu-crud/releases/latest/download/kudu-console.jar
+  https://github.com/999bug/kudu-console/releases/latest/download/kudu-console.jar
 
 # 3. 装服务
 sudo cp deploy/kudu-console.service /etc/systemd/system/
@@ -173,13 +173,13 @@ docker compose up -d --build     # 首次 3~8 分钟，主要在拉 Maven 依赖
 | 有 Docker，能连 registry | 直接 pull 镜像 | `docker pull` |
 | 有 Docker，完全断网 | 镜像离线包 `tar.gz` | 下载后 `docker load` |
 
-产物都在 Release 页：`https://github.com/999bug/kudu-crud/releases`
+产物都在 Release 页：`https://github.com/999bug/kudu-console/releases`
 
 ### A. 只需 JDK：直接跑 jar
 
 ```bash
 # 有网的机器上下载
-curl -fL -O https://github.com/999bug/kudu-crud/releases/latest/download/kudu-console.jar
+curl -fL -O https://github.com/999bug/kudu-console/releases/latest/download/kudu-console.jar
 
 scp kudu-console.jar user@目标机:/opt/kudu-console/
 
@@ -213,7 +213,7 @@ docker run -d --name kudu-console \
 
 ```bash
 # 有网的机器下载（约 400~600 MB）
-curl -fLO https://github.com/999bug/kudu-crud/releases/download/v1.0.1/kudu-console-image-v1.0.1.tar.gz
+curl -fLO https://github.com/999bug/kudu-console/releases/download/v1.0.1/kudu-console-image-v1.0.1.tar.gz
 
 scp kudu-console-image-v1.0.1.tar.gz user@目标机:/tmp/
 
@@ -235,18 +235,18 @@ docker run -d --name kudu-console \
 镜像站（第三方服务，可用性随时变化，能通就用）：
 
 ```bash
-git clone https://ghfast.top/https://github.com/999bug/kudu-crud.git
-git clone https://ghproxy.net/https://github.com/999bug/kudu-crud.git
-git clone https://kkgithub.com/999bug/kudu-crud.git
+git clone https://ghfast.top/https://github.com/999bug/kudu-console.git
+git clone https://ghproxy.net/https://github.com/999bug/kudu-console.git
+git clone https://kkgithub.com/999bug/kudu-console.git
 ```
 
 或者在有网的机器上打成 bundle 带过去，这样走的是完整 git 历史：
 
 ```bash
-git bundle create kudu-crud.bundle --all
-scp kudu-crud.bundle user@目标机:/tmp/
+git bundle create kudu-console.bundle --all
+scp kudu-console.bundle user@目标机:/tmp/
 # 目标机器
-git clone /tmp/kudu-crud.bundle kudu-crud
+git clone /tmp/kudu-console.bundle kudu-console
 ```
 
 再次提醒：clone 只解决"拿到源码"，构建仍要 JDK、Node、Maven 和能访问 Maven 中央仓库的网络。内网环境请优先用 A / B / C。

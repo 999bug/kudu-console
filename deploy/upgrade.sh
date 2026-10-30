@@ -13,14 +13,14 @@
 #   CHECK_ONLY=1 ./upgrade.sh # 只检查，不安装（适合挂 cron 做巡检）
 #
 # 环境变量：
-#   REPO       默认 999bug/kudu-crud
+#   REPO       默认 999bug/kudu-console
 #   APP_DIR    默认 /opt/kudu-console
 #   SERVICE    systemd 服务名，默认 kudu-console；设为空则跳过重启
 #   MODE       systemd | docker，默认自动判断
 #   JAR        显式指定 jar 落盘路径，默认按 MODE 推导
 set -euo pipefail
 
-REPO="${REPO:-999bug/kudu-crud}"
+REPO="${REPO:-999bug/kudu-console}"
 APP_DIR="${APP_DIR:-/opt/kudu-console}"
 SERVICE="${SERVICE:-kudu-console}"
 VERSION_FILE="$APP_DIR/VERSION"

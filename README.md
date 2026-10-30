@@ -1,6 +1,6 @@
 # Kudu 控制台
 
-[![CI](https://github.com/999bug/kudu-crud/actions/workflows/ci.yml/badge.svg)](https://github.com/999bug/kudu-crud/actions/workflows/ci.yml)
+[![CI](https://github.com/999bug/kudu-console/actions/workflows/ci.yml/badge.svg)](https://github.com/999bug/kudu-console/actions/workflows/ci.yml)
 
 测试环境用的 Apache Kudu 管理台：一个 Java 进程同时提供 REST 接口与 Vue 前端页面，Docker 一条命令部署。支持**多个 Kudu 平台**一键切换，每个平台独立建连、独立缓存，某个平台连不上不影响其它平台。
 

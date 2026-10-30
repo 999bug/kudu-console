@@ -1,6 +1,6 @@
 [Unit]
 Description=Kudu Console
-Documentation=https://github.com/999bug/kudu-crud
+Documentation=https://github.com/999bug/kudu-console
 After=network-online.target
 Wants=network-online.target
 
