@@ -13,7 +13,7 @@
 
     <groupId>com.kuducrud</groupId>
     <artifactId>kudu-console</artifactId>
-    <version>1.0.0</version>
+    <version>1.1.0</version>
     <name>kudu-console</name>
     <description>Kudu 管理控制台（测试环境）</description>
 
