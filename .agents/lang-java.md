@@ -14,7 +14,45 @@
   - `instanceof` + 强转 两行（用模式匹配）
 - **【建议】`var` 只用于类型显而易见的局部变量**（`var list = new ArrayList<String>()` 可以，`var r = service.call()` 不行）。
 
-## 2. 空值与 Optional
+## 2. 导入与命名
+
+本节是**格式与可读性**要求：不影响编译和运行，但直接影响读代码和 review 的速度，照样要改。判断标准是"别人能不能在一屏内看清这行在做什么"，不是"机器能不能跑"。
+
+- **【默认】禁止用全限定类名（FQN）代替 import**。业务行里出现 `com.foo.bar.Baz`，等于让读者在声明处和调用处各解析一遍包路径，diff 里也只剩一堵包名。
+- **【默认】只有同名类冲突才写全名，并在上一行注明原因**。用得多的一方 import，另一方只在唯一出现处写全名，`// 为什么用全名` 单独占一行；同一文件里禁止一处短名、一处全名混用。
+- **【默认】禁止行尾注释**。注释独立成行，放在被解释语句的**上一行**：`int x = calc(); // 说明` 这种写法，行宽一变、格式化一动就被挤到看不见的地方；写在方法调用的参数中间更糟，一句调用被割成两半，读者得先跳过注释才能找到参数。工具指令是唯一例外（`// NOSONAR` / `// noinspection`），它们必须贴在同一行才生效。
+- **【默认】不用通配导入**（`import com.foo.*`）。它掩盖依赖来源，同名冲突时无法从 import 区判断实际类型；IDE 自动补全产生的通配 import 要展开成具体类名。
+- **【默认】未使用的 import 必须删掉**。它不报错，但会让"这个类依赖什么"判断失真，也是重构没做干净的信号。
+- **【默认】静态导入只给测试断言与常量**（`assertThat` / `mock` / `verify` / `SECONDS`）。`import static com.foo.Utils.parse` 会把调用点变成孤立的 `parse(x)`，读者找不到它属于谁。
+- **【默认】嵌套类型写 `Outer.Inner`**，不要写完整包名；注解、泛型参数、`instanceof`、`catch` 里的类型同样走 import。
+- **【默认】命名按 Java 惯例**：类/接口 `UpperCamel`、方法/变量 `lowerCamel`、常量 `UPPER_SNAKE`、包名全小写（不带下划线与大写）。缩略语按单词处理：`parseHttpUrl` 而非 `parseHTTPURL`，`userId` 而非 `userID`。
+- **【默认】布尔用 `is` / `has` / `can` 前缀**，不用 `flag` / `status` 这种没信息量的名字；方法名以动词开头。
+- **【建议】名字长度与作用域成正比**：循环下标 `i` 可以，字段叫 `d`、`tmp`、`m` 不行。
+- **【建议】导入分组**：`java` / `javax` → 第三方 → 本项目，组间空一行。交给 IDE 格式化，别手工维护顺序。
+- **【建议】能交给工具管的别靠人记**：import 顺序、未使用 import、通配展开用 IDE 的 Optimize Imports 或 spotless 的 `removeUnusedImports` / `importOrder`，提交前跑一次。工具修不了的（FQN、命名、静态导入滥用）在 review 里当场提，别攒成技术债。
+
+```java
+// ✓ 包名只出现在 import 区，业务行只剩短名
+import com.i2.i2bb.node.transfer.kudu.summary.KuduTaskSummary;
+import com.i2.i2bb.node.transfer.kudu.summary.KuduTaskSummaryRegistry;
+
+KuduTaskSummary summary = KuduTaskSummaryRegistry.summaryOrStartBackup(rule);
+
+// ✗ 声明和调用各背一遍包名，一行占两行长度
+com.i2.i2bb.node.transfer.kudu.summary.KuduTaskSummary summary =
+    com.i2.i2bb.node.transfer.kudu.summary.KuduTaskSummaryRegistry.summaryOrStartBackup(rule);
+
+// ✗ 行尾注释，还夹在调用参数中间
+org.apache.avro.Schema deltaSchema =
+    KuduAvroSchemaUtil.toAvroSchemaWithOp( // 与 org.apache.kudu.Schema 同名，这里要 Avro 的
+        kuduSchema, op);
+
+// ✓ 说明独立成行，放在被解释语句上一行
+// 与 org.apache.kudu.Schema 同名，这里要 Avro 的
+org.apache.avro.Schema deltaSchema = KuduAvroSchemaUtil.toAvroSchemaWithOp(kuduSchema, op);
+```
+
+## 3. 空值与 Optional
 
 - **【红线】集合、数组、Map 的返回值禁止 `null`**，返回空集合（`List.of()` / `Collections.emptyList()`）。
 - **【默认】`Optional` 只用于返回值**。禁止作为字段、方法参数、集合元素——它不实现 `Serializable`，也不是"可空标记"。
@@ -24,7 +62,7 @@
 - **【红线】包装类型拆箱前判空**：`Long`/`Integer` 直接赋给 `long`/`int` 是 NPE 高发点，尤其是"以前是 int、后来改成 Long"的字段。可选字段在 getter 兜底并注释原因，必填字段保持 fail-fast。
 - **【建议】可空返回值用注解表达**（`@Nullable` / `@NonNull`），比注释可靠。
 
-## 3. 并发与虚拟线程
+## 4. 并发与虚拟线程
 
 - **【红线】虚拟线程（JDK 21+）护共享状态时不用 `synchronized`**。JDK 24 之前 `synchronized` 会把载体线程 pin 住，吞吐直接塌。用 `ReentrantLock` + `try/finally` 解锁。
   - 判定标准只有一条：**锁内是否可能阻塞**（网络写、磁盘、JNI、等待其它锁）。会阻塞就必须换 JUC 锁，不阻塞的短临界区无所谓。
@@ -41,7 +79,7 @@
 - **【默认】JNI / 原生调用会 pin 载体线程**，能缓存结果就缓存（密码解密结果这类），把调用频次降下来。
 - **【默认】`CompletableFuture` 指定执行器**，不要用默认 `ForkJoinPool.commonPool` 跑阻塞任务；异常必须 `handle` / `exceptionally` 兜底，否则静默丢失。
 
-## 4. 超时与重试
+## 5. 超时与重试
 
 - **【红线】超时预算必须层层小于上游**。写法：`本层总预算 + 单次调用最坏耗时 < 调用方等待上限`，并在配置项注释里写清推导。否则会出现「调用方已超时失败，本层还在跑并回写状态」，界面表现为"报错了又自己变好"。
 - **【红线】`orTimeout` / `get(timeout)` 不会取消后台任务**。超时返回后，后台可能继续执行并写共享状态。要么真取消，要么让后台在超时后不再写缓存/状态。
@@ -51,7 +89,7 @@
 - **【默认】失败退避的 key 用"账号 + 目标"，不用密码**：账号锁定是按账号计的，用密码做 key 会让人换个密码就绕过保护。退避要有初始值、上限、成功清零；配置变更（密码改动）放行一次。
 - **【默认】长任务用"无进展超时"而不是总时长上限**：判据要选能反映真实进展的信号（行级/条级计数），只数"分片完成数"会把大分片误杀；单表跑几天只要持续有进展就不该失败。
 
-## 5. 缓存
+## 6. 缓存
 
 - **【红线】Guava `Cache.get(key, loader)` 的异常要 catch 两个**：loader 抛受检异常包成 `ExecutionException`，抛非受检异常包成 `UncheckedExecutionException`。只 catch 前者，登录失败后的清理与类型转换永远不会执行。
 - **【默认】缓存 key 要包含"会改变结果"的凭据指纹**（密码 hash、token 版本）。否则用户改了配置但缓存照旧，表现为"改了密码还显示在线"。
@@ -60,7 +98,7 @@
 - **【默认】被高频轮询的接口必须有缓存层**：前端 10 秒轮询一次 = 8640 次/天，指向真实下游会把对方账号刷锁。分级：缓存命中 → 轻量探活 → 才真实认证。
 - **【默认】并发加载要合并**：多线程同时未命中时用 `get(key, loader)` 的原子加载，不要自己写 check-then-act。
 
-## 6. 异常与错误
+## 7. 异常与错误
 
 - **【红线】禁止空 catch**：`catch (Exception e) {}` 是最常见的故障放大器。
 - **【红线】禁止 `e.printStackTrace()`**，用日志框架。
@@ -71,7 +109,7 @@
 - **【默认】业务语义有优先级**：用户主动停止 > 普通异常；聚合多个异常时按语义排序，别让先到的技术异常覆盖掉"用户停止了"这个事实。
 - **【建议】对外 API 的 code 是契约**，新增必须同步文档。
 
-## 7. 日志
+## 8. 日志
 
 - **【默认】用 SLF4J 占位符**（`log.info("table={} rows={}", t, n)`），不用字符串拼接。
 - **【默认】日志消息用英文**（异常消息、CLI 输出同理），代码注释与文档用中文——日志要贴工单、被 grep、被不同语言的同事读。
@@ -81,7 +119,7 @@
 - **【默认】不打全量对象**：`toString()` 可能带敏感字段且有性能开销，打关键字段即可。
 - **【建议】级别语义**：error = 需人介入；warn = 可自愈但要知道；info = 关键业务节点；debug = 排障细节。
 
-## 8. JSON 序列化
+## 9. JSON 序列化
 
 - **【默认】优先用带类型的绑定**（POJO / record），原始 `JsonElement` 转 `Map` 只用于确实需要动态结构的场景。
 - **【红线】原始 JSON 里的数字不要直接强转**。Gson 的 `JsonPrimitive.getAsNumber()` 返回 `LazilyParsedNumber`，强转 `Integer`/`Double` 会 `ClassCastException`。按值显式分档：含小数点或指数 → `Double`；整数按范围 → `int` / `long` / `BigInteger`。
@@ -89,7 +127,7 @@
 - **【默认】工具类禁止实例化**（私有构造 + 抛 `UnsupportedOperationException`），避免被 new 出来后带着状态乱跑。
 - **【默认】`null` 与"字段不存在"在契约上要区分清楚**：序列化时是否输出 null 字段，全局统一。
 
-## 9. 依赖与构建
+## 10. 依赖与构建
 
 - **【红线】不擅自升级依赖大版本 / 换构建工具**。升级附收益、破坏面、回滚方式。
 - **【默认】不加"全家桶"依赖**。Spring 项目按需引 starter，不要为了一个工具类引整套框架。
@@ -97,7 +135,7 @@
 - **【红线】SNAPSHOT 依赖不上生产镜像**。
 - **【建议】构建参数注入版本信息**（`APP_VERSION` / `GIT_COMMIT` / `BUILD_TIME`），不把版本号写死在代码里。
 
-## 10. 测试
+## 11. 测试
 
 - **【默认】沿用项目既有测试栈**（JUnit 5 + AssertJ / Mockito），不引入第二套。
 - **【默认】纯逻辑抽成无副作用方法**再测；不要在单测里连真实数据库、真实集群。
@@ -107,7 +145,7 @@
 - **【红线】不为了让测试过而放宽断言或删用例**。用例错了改用例，代码错了改代码，交付说明里讲清是哪一种。
 - **【建议】每个 bug 修复补一个能复现的用例**，否则同一个坑会回来。
 
-## 11. 反例清单（见到就改）
+## 12. 反例清单（见到就改）
 
 ```java
 // ✗ 虚拟线程里用 synchronized 护阻塞 I/O（JDK 24 前会 pin 载体线程）
@@ -136,4 +174,22 @@ Executors.newFixedThreadPool(10)
 // ✓ 有界 + 拒绝策略 + 命名
 new ThreadPoolExecutor(10, 20, 60, SECONDS,
     new ArrayBlockingQueue<>(200), namedFactory("io-"), new CallerRunsPolicy());
+
+// ✗ 全限定类名代替 import：声明和调用各背一遍包名
+com.i2.i2bb.node.transfer.kudu.summary.KuduTaskSummary summary =
+    com.i2.i2bb.node.transfer.kudu.summary.KuduTaskSummaryRegistry.summaryOrStartBackup(rule);
+
+// ✓ 包名只留在 import 区
+import com.i2.i2bb.node.transfer.kudu.summary.KuduTaskSummary;
+import com.i2.i2bb.node.transfer.kudu.summary.KuduTaskSummaryRegistry;
+
+KuduTaskSummary summary = KuduTaskSummaryRegistry.summaryOrStartBackup(rule);
+
+// ✗ 行尾注释（夹在参数中间更糟）
+call( // 说明
+    a, b);
+
+// ✓ 注释独立成行，放在被解释语句上一行
+// 说明
+call(a, b);
 ```
