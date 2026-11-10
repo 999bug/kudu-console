@@ -76,6 +76,7 @@ export const api = {
   clusterStatus: () => request('GET', '/api/cluster/status'),
   listTables: () => request('GET', '/api/tables'),
   previewDropPrefix: (prefix) => request('GET', '/api/tables/prefix', { params: { prefix } }),
+  previewDropSuffix: (suffix) => request('GET', '/api/tables/suffix', { params: { suffix } }),
   tableDetail: (table) => request('GET', '/api/table', { params: { table } }),
   options: () => request('GET', '/api/meta/options'),
 
@@ -98,6 +99,8 @@ export const api = {
     request('POST', '/api/jobs/drop-db', { params: { db }, body: { confirm, acknowledge: true } }),
   dropPrefix: (prefix, confirm) =>
     request('POST', '/api/jobs/drop-prefix', { params: { prefix }, body: { confirm, acknowledge: true } }),
+  dropSuffix: (suffix, confirm) =>
+    request('POST', '/api/jobs/drop-suffix', { params: { suffix }, body: { confirm, acknowledge: true } }),
   jobs: () => request('GET', '/api/jobs'),
   job: (id) => request('GET', '/api/jobs/' + id),
   cancelJob: (id) => request('POST', `/api/jobs/${id}/cancel`),

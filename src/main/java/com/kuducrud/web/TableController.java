@@ -2,6 +2,7 @@ package com.kuducrud.web;
 
 import com.kuducrud.config.ClusterRegistry;
 import com.kuducrud.job.DropPrefixService;
+import com.kuducrud.job.DropSuffixService;
 import com.kuducrud.model.TableDetail;
 import org.apache.kudu.ColumnSchema;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -40,6 +41,12 @@ public class TableController {
     @GetMapping("/tables/prefix")
     public DropPrefixService.PrefixPreview prefixPreview(@RequestParam("prefix") String prefix) {
         return registry.current().dropPrefix().preview(prefix);
+    }
+
+    /** 按后缀删表前的预览：命中的完整表名 + 被跳过的系统表数量。 */
+    @GetMapping("/tables/suffix")
+    public DropSuffixService.SuffixPreview suffixPreview(@RequestParam("suffix") String suffix) {
+        return registry.current().dropSuffix().preview(suffix);
     }
 
     /** 前端下拉用的枚举值。 */

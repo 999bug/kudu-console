@@ -3,6 +3,7 @@ package com.kuducrud.config;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.kuducrud.job.DropDbService;
 import com.kuducrud.job.DropPrefixService;
+import com.kuducrud.job.DropSuffixService;
 import com.kuducrud.job.JobRegistry;
 import com.kuducrud.job.TruncateService;
 import com.kuducrud.kudu.KuduConnectionManager;
@@ -34,6 +35,7 @@ public class ClusterRuntime {
     private final TruncateService truncate;
     private final DropDbService dropDb;
     private final DropPrefixService dropPrefix;
+    private final DropSuffixService dropSuffix;
     private final TestActionService testActions;
 
     public ClusterRuntime(ClusterConfig config, KuduProperties props, ObjectMapper mapper, JobRegistry jobs) {
@@ -52,6 +54,7 @@ public class ClusterRuntime {
         this.truncate = new TruncateService(connection, jobs, props, config.id());
         this.dropDb = new DropDbService(connection, jobs, config.id());
         this.dropPrefix = new DropPrefixService(connection, jobs, config.id());
+        this.dropSuffix = new DropSuffixService(connection, jobs, config.id());
         this.testActions = new TestActionService(connection, ddl, session, jobs, props, mapper, config.id());
     }
 
@@ -101,6 +104,10 @@ public class ClusterRuntime {
 
     public DropPrefixService dropPrefix() {
         return dropPrefix;
+    }
+
+    public DropSuffixService dropSuffix() {
+        return dropSuffix;
     }
 
     public TestActionService testActions() {

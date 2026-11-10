@@ -62,6 +62,18 @@ public class JobController {
                 request == null ? null : request.acknowledge());
     }
 
+    public record DropSuffixRequest(String confirm, Boolean acknowledge) {
+    }
+
+    /** 按表名后缀批量删表（异步任务）：删除前用 GET /api/tables/suffix 预览命中的表。 */
+    @PostMapping("/drop-suffix")
+    public JobView dropSuffix(@RequestParam("suffix") String suffix,
+                              @RequestBody(required = false) DropSuffixRequest request) {
+        return registry.current().dropSuffix().submit(suffix,
+                request == null ? null : request.confirm(),
+                request == null ? null : request.acknowledge());
+    }
+
     @GetMapping
     public List<JobView> list() {
         return jobs.list();

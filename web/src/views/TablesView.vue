@@ -7,6 +7,7 @@ import { formatBytes, formatCount } from '../format'
 import CreateTableDialog from '../components/CreateTableDialog.vue'
 import ConfirmDialog from '../components/ConfirmDialog.vue'
 import DropPrefixDialog from '../components/DropPrefixDialog.vue'
+import DropSuffixDialog from '../components/DropSuffixDialog.vue'
 
 const router = useRouter()
 const loading = ref(false)
@@ -16,6 +17,7 @@ const keyword = ref('')
 const activeDb = ref('')
 const showCreate = ref(false)
 const showDropPrefix = ref(false)
+const showDropSuffix = ref(false)
 
 const deleteTable = ref(null)
 const deleteDb = ref(null)
@@ -74,6 +76,12 @@ function onCreated(name) {
 function onPrefixSubmitted(job) {
   showDropPrefix.value = false
   toast(`已提交按前缀删除任务：${job.table}（${job.totalEstimate ?? '—'} 张表）`)
+  router.push('/jobs')
+}
+
+function onSuffixSubmitted(job) {
+  showDropSuffix.value = false
+  toast(`已提交按后缀删除任务：${job.table}（${job.totalEstimate ?? '—'} 张表）`)
   router.push('/jobs')
 }
 
@@ -148,6 +156,7 @@ onMounted(load)
               <span v-if="loading" class="spinner"></span>刷新
             </button>
             <button class="btn danger sm" @click="showDropPrefix = true">按前缀删除</button>
+            <button class="btn danger sm" @click="showDropSuffix = true">按后缀删除</button>
             <button class="btn primary sm" @click="showCreate = true">新建表</button>
           </div>
         </div>
@@ -202,8 +211,8 @@ onMounted(load)
       </div>
       <div class="hint" style="margin-top: 8px">
         表名为 Kudu 中的完整名；<span class="mono">impala::</span> 前缀表示该表由 Impala 创建管理。
-        「删除库」会删掉该前缀下的全部表（Kudu 没有真正的库），「按前缀删除」可指定任意表名前缀，
-        两者都走异步任务，可在任务中心看进度。
+        「删除库」会删掉该前缀下的全部表（Kudu 没有真正的库），「按前缀删除」「按后缀删除」按表名前缀/后缀批量匹配，
+        三者都走异步任务，可在任务中心看进度。
       </div>
     </div>
 
@@ -213,6 +222,12 @@ onMounted(load)
       v-if="showDropPrefix"
       @close="showDropPrefix = false"
       @submitted="onPrefixSubmitted"
+    />
+
+    <DropSuffixDialog
+      v-if="showDropSuffix"
+      @close="showDropSuffix = false"
+      @submitted="onSuffixSubmitted"
     />
 
     <ConfirmDialog

@@ -11,6 +11,7 @@ import com.kuducrud.kudu.KuduSessionTemplate;
 import com.kuducrud.kudu.KuduValueConverter;
 import com.kuducrud.kudu.TableNameUtil;
 import com.kuducrud.kudu.TablePrefixMatcher;
+import com.kuducrud.kudu.TableSuffixMatcher;
 import com.kuducrud.kudu.TestRowGenerator;
 import com.kuducrud.model.ColumnDef;
 import com.kuducrud.model.JobView;
@@ -145,7 +146,7 @@ public class TestActionService {
         }
     }
 
-    /** 提交前检查是否有删库 / 按前缀删表任务覆盖了目标表。 */
+    /** 提交前检查是否有删库 / 按前缀 / 按后缀删表任务覆盖了目标表。 */
     public void checkConflicts(List<String> tables) {
         for (String key : jobs.runningResourceKeys(clusterId)) {
             if (key.startsWith(JobRegistry.DB_KEY)) {
@@ -162,6 +163,14 @@ public class TestActionService {
                     if (TablePrefixMatcher.matches(prefix, table)) {
                         throw ApiException.conflict("JOB_CONFLICT",
                                 "前缀 " + prefix + " 正在执行删除任务，请等待其结束");
+                    }
+                }
+            } else if (key.startsWith(JobRegistry.SUFFIX_KEY)) {
+                String suffix = key.substring(JobRegistry.SUFFIX_KEY.length());
+                for (String table : tables) {
+                    if (TableSuffixMatcher.matches(suffix, table)) {
+                        throw ApiException.conflict("JOB_CONFLICT",
+                                "后缀 " + suffix + " 正在执行删除任务，请等待其结束");
                     }
                 }
             }

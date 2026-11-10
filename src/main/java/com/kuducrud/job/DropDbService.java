@@ -49,7 +49,7 @@ public class DropDbService {
         if (tables.isEmpty()) {
             throw ApiException.notFound("库 " + name + " 下没有表");
         }
-        String conflict = DropConflicts.forDb(registry, clusterId, name);
+        String conflict = DropConflicts.forDb(registry, clusterId, name, tables);
         if (conflict != null) {
             throw ApiException.conflict("JOB_CONFLICT", conflict);
         }

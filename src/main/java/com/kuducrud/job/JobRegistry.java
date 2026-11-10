@@ -28,10 +28,11 @@ public class JobRegistry {
     private static final Logger log = LoggerFactory.getLogger(JobRegistry.class);
     private static final int MAX_JOBS = 50;
 
-    /** 资源键前缀：单表任务、删库任务、按前缀删表任务。 */
+    /** 资源键前缀：单表任务、删库任务、按前缀删表任务、按后缀删表任务。 */
     public static final String TABLE_KEY = "t:";
     public static final String DB_KEY = "d:";
     public static final String PREFIX_KEY = "p:";
+    public static final String SUFFIX_KEY = "s:";
 
     private final Map<String, JobHandle> jobs = new ConcurrentHashMap<>();
     private final Set<String> runningKeys = ConcurrentHashMap.newKeySet();
@@ -50,7 +51,7 @@ public class JobRegistry {
     /**
      * 登记任务并占用资源锁。{@code resourceKey} 相同即互斥：
      * 单表任务用 {@code clusterId|t:<table>}，删库任务用 {@code clusterId|d:<db>}，
-     * 按前缀删表用 {@code clusterId|p:<prefix>}。
+     * 按前缀删表用 {@code clusterId|p:<prefix>}，按后缀删表用 {@code clusterId|s:<suffix>}。
      */
     public JobHandle create(String type, String clusterId, String target, String resourceKey, String lockLabel) {
         if (!runningKeys.add(resourceKey)) {
@@ -138,6 +139,10 @@ public class JobRegistry {
 
     public static String prefixKey(String clusterId, String prefix) {
         return clusterId + "|" + PREFIX_KEY + prefix;
+    }
+
+    public static String suffixKey(String clusterId, String suffix) {
+        return clusterId + "|" + SUFFIX_KEY + suffix;
     }
 
     public JobHandle get(String id) {
