@@ -1,122 +1,117 @@
 # 项目档案（project-profile）
 
-> 每个项目只改这一个文件。这里的事实优先于通用规范；通用规范不写项目事实。
+> 每个项目只改这一个文件。写 `未定` 表示还没确认——去确认，不要猜。
+> 这里的事实优先于通用规范；通用规范不写项目事实。
+>
+> 生成方式：install.sh 探测初稿 + detect-profile.sh 补探 + 用户确认（2026-11-12）。
+> **升级不会改这个文件**；需要按新模板重整时，手动跑 `/ai-dev-standards:profile`。
+
+## 0. 遇到「未定」怎么办
+
+**【红线】不许猜。** 没填完的 profile 比没有更危险：AI 会拿示例值当事实，一路错下去。
+
+遇到 `未定` 就停下来问，一次问清。只有三种情况可以不等：用户已给出等价信息、该项与当前任务无关、用户说"先按默认走"。
+
+判定标准：**猜错的代价 > 多问一句的成本时，必须问。**
 
 ## 1. 基本信息
 
 ```yaml
 project: kudu-console
-type: oss                         # GitHub 开源项目
-visibility: public
-description: 测试环境用的 Apache Kudu 管理台，单进程提供 REST 与页面，Docker 一条命令部署
+type: oss                         # GitHub 开源项目（用户确认 2026-11-12）
+visibility: public                # gh repo view 实测 PUBLIC
+description: Kudu 管理控制台（测试环境）
 ```
+
+`type` 决定提交身份、敏感信息尺度、发布链路。下面各节按类型给默认值，不符就显式写出来。
 
 ## 2. 技术栈
 
 ```yaml
-languages:
-  java: 17                        # pom.xml: java.version=17
-  vue: 3                          # web/package.json: vue ^3.5.13 + vite ^5.4.11
-framework: spring-boot 3.3.12     # + org.apache.kudu:kudu-client 1.17.1
-package_manager: maven            # 前端用 npm，锁文件 web/package-lock.json 入库
-build_command: ./build.sh         # Windows 用 build.bat；内部完成 npm build + mvn clean package
-test_command: mvn -B test         # 本机无全局 mvn / java，需先设 JAVA_HOME，见 DEVELOPMENT.md 附录 A
-dev_command: java -jar target/kudu-console.jar --server.port=9099
+languages:                        # 只填实际用到的，版本写实际值，不写 "8+"
+  java: 17
+  vue: 3                          # web/ 下 19 个 .vue 文件，vue ^3.5.13 + vite 5
+framework: spring-boot
+package_manager: maven            # 主语言侧；前端 web/ 用 npm，见 §9
+build_command: mvn -B package
+test_command: mvn -B test
+dev_command: docker compose up
 ```
 
-## 3. 提交身份与策略（oss）
+## 3. 提交与推送
 
 ```yaml
 git_user_name: saul
 git_user_email: 57277097+999bug@users.noreply.github.com
-enable_private_email: true
-```
-
-```yaml
-commit_style: conventional        # 历史提交为 feat: / docs: ，不中途换风格
-                                  # 要切公司 [NF]/[BF]/[IM] 风格，改这一行并同步 commit.md 的执行口径
-issue_tracker: GitHub Issues      # 无禅道 / Bugzilla，单号用 Closes #123
-auto_commit: true
-push_policy: on-request           # 提交自动，push 等明确授权
+commit_style: conventional
+issue_tracker: GitHub Issues
+auto_commit: true                 # 改完自动提交，不必每次问
+push_policy: on-request           # on-request（等授权）| never | allowed
 ```
 
 ## 4. 交付与发布
 
 ```yaml
-deploy_target: docker-compose     # 主用 docker-compose.prod.yml；备选 jar + systemd
-release_trigger: manual           # Actions 手动 workflow_dispatch，或 git push origin vX
+deploy_target: docker-compose
+release_trigger: tag              # 推 v* 标签触发 release.yml；也支持 Actions 手动（workflow_dispatch，可留空自动取 v1.0.<run_number>）
 version_scheme: v1.0.<run_number>
 registry: ghcr.io/999bug/kudu-console
-domestic_mirror: 阿里云 ACR       # 可选，配 ACR_REGISTRY/ACR_NAMESPACE/ACR_USERNAME/ACR_PASSWORD 才同步
-pages: no                         # JVM 服务 + 需要连通内网 Kudu，Pages 不适用
-release_assets: kudu-console.jar + .sha256 + kudu-console-image-<tag>.tar.gz
-retention: 20                     # Release 只留最近 20 个，tag 全留
+pages: no                         # 只有纯静态产物才 yes
 ```
 
 ## 5. 敏感信息
 
 ```yaml
-secrets_location: GitHub Repository secrets
-never_commit:
-  - .env（含集群地址与 TUNNEL_TOKEN）
-  - config/*.json（含内网 master 地址）
-  - logs/ data/ release/ target/
-  - src/main/resources/static/（前端构建产物）
+secrets_location: GitHub Repository secrets   # ACR_NAMESPACE/ACR_PASSWORD/ACR_REGISTRY/ACR_USERNAME/GITHUB_TOKEN；本地另有 .env.example
+never_commit:                     # 除通用规则外的项目特有项
+  - config/*.json                 # 运行时连接配置，含内网环境地址
+  - .env                          # 含集群地址与 tunnel token
 internal_endpoints:
-  allowed_in_docs: false          # 待确认：README / DEPLOY / .env.example 仍有 192.168.46.23 示例地址
+  allowed_in_docs: false          # 内网地址能否写进公开文档
 ```
 
 ## 6. 作用域与验证
 
 ```yaml
-ai_scope:                         # AI 只看 / 只改这些目录
-  - src/main/java
-  - src/test/java
-  - web/src
-  - tools
-  - README.md / DEVELOPMENT.md / AGENTS.md / .agents
-  # 排除：target、src/main/resources/static（构建产物）、web/node_modules、logs、config
-log_language: en                  # 现有 48 条日志均为英文，保持
-verify_build: ./build.sh
-verify_test: mvn -B test
-verify_test_policy: full
-verify_smoke: KUDU_CONSOLE_URL=http://localhost:9099 python tools/api-smoke.py
-verify_version: curl -s http://localhost:9099/api/meta/version
-verify_ui: Playwright + 本机 Chromium，1440 / 820 / 700 三档截图
-test_port: 9099                   # 别占 8088
+ai_scope:                         # 只写目录路径，不写"前端代码"这种描述
+  - src
+  - web                           # Vue 前端源码
+log_language: zh                  # 最近 20 条提交 subject 全中文
+verify_build: mvn -B package      # 2026-11-12 实跑通过
+verify_test: mvn -B test          # 2026-11-12 实跑通过（57 个测试全绿）
+verify_test_policy: full          # full | compile-only（用 compile-only 要在 §8 写原因）
+test_port: 9099                   # 自测端口，避开默认端口
+# 有冒烟/版本/UI 检查就补：verify_smoke、verify_version、verify_ui，写命令
 ```
+
+`verify_*` 为空时按通用规范兜底：构建 + 测试 + 起服务实测。填了就必须跑填的那条。
 
 ## 7. 项目自有文档
 
 ```yaml
-related_docs:                     # 先读这些，优先级高于通用建议
-  - DEVELOPMENT.md                # 开发与发布规范：初始化、提交、自测闭环、流水线、四张清单
-  - README.md                     # 功能、REST 接口、实现要点与限制
-  - DEPLOY.md                     # 三种部署形态、离线包、公网访问、上线检查
-  - ALIYUN-ACR.md                 # 国内镜像同步与服务器拉取
+related_docs:                     # 先读这些再动手，优先级高于通用建议
+  - ALIYUN-ACR.md                 # 阿里云 ACR 发布与部署
+  - DEPLOY.md
+  - DEVELOPMENT.md
 ```
 
 ## 8. 覆盖与例外
 
+通用规范里不适用或需要偏离的，逐条写「规则 / 偏离 / 理由」。没有写「无」。
+
 ```yaml
-overrides:
-  - rule: 容器内非 root 运行（release-docker 建议）
-    deviation: 以 root 运行
-    reason: 基础镜像未建非 root 用户，且仅测试环境使用
-
-  - rule: 服务需鉴权
-    deviation: 无任何鉴权
-    reason: 仅测试环境；公网暴露必须外层加 Cloudflare Access 或 Basic Auth
-
-  - rule: 发布 tag 用 annotated
-    deviation: v1.0.1~v1.0.11 均为 lightweight tag，流水线自动补 tag 也是轻量的
-    reason: 历史遗留，待统一；不影响回滚（按 tag 名 checkout 仍可用）
+overrides: []
 ```
 
-## 9. 已知的技术债 / 雷区
+## 9. 已知的雷区
 
-- **本机无 Docker**：镜像只能在 CI 验证。改 Dockerfile 后必须发版确认镜像能起、`/api/meta/version` 的 commit 正确。
-- **本机无全局 java/mvn**：一律用 `build.sh` 或显式 `JAVA_HOME`；`SERVER__PORT` 会覆盖 `server.port`，起服务必须显式 `--server.port=`。
-- **手填已存在的版本号会覆盖 Release 附件**（`--clobber`），流水线未判重：重发一律用新 patch 号。
-- **多平台下 service 不能有 Spring 单例状态**：所有业务对象随 `ClusterRuntime` 创建。
-- **新增页面必须注册 SPA 回退**，否则直接刷新 404（踩过 `/test-ops`）。
+只写会影响判断的那几条：字段名与含义不符、不能碰的模块、必须连真实环境才能跑的测试。
+
+- **`mvn -B package` 不含前端构建。** 前端在 `web/`（npm + Vite），完整构建用 `./build.sh`：先 `npm run build` 产出到 `src/main/resources/static/`，再跑 Maven。只改前端时跑 `mvn package` 不会把新页面打进 jar。
+- 包管理器有两个：后端 maven、前端 npm（`web/package.json`）。`package_manager` 记的是主语言侧的 maven。
+- 本项目是测试环境用的管理台，连的是真实 Kudu 集群；`config/*.json` 与 `.env` 里有内网地址，不入库（见 §5）。
+
+## 10. 附：从 /init 产物抽取的原文（可选）
+
+需要时把项目原有 `CLAUDE.md` / `AGENTS.md` 的正文按标题降一级追加到这里。
+先消化进 §1–§9，再归档；不需要就删掉本节。
